@@ -1,0 +1,31 @@
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import Login from './components/Login';
+import Layout from './components/Layout';
+import Inicio from './pages/Inicio';
+import EstadisticasLicencias from './pages/EstadisticasLicencias';
+import EstadisticasReposo from './pages/EstadisticasReposo';
+import CargaReposo from './pages/CargaReposo';
+import Bitacora from './pages/Bitacora';
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        
+        {/* Protected Routes wrapped in Layout */}
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Navigate to="/inicio" replace />} />
+          <Route path="inicio" element={<Inicio />} />
+          <Route path="licencias/estadisticas" element={<EstadisticasLicencias />} />
+          <Route path="reposo/estadisticas" element={<EstadisticasReposo />} />
+          <Route path="reposo/carga" element={<CargaReposo />} />
+          <Route path="reposo/auditoria" element={<Bitacora />} />
+        </Route>
+      </Routes>
+    </Router>
+  );
+}
+
+export default App;
