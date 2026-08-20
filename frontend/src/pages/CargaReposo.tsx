@@ -15,37 +15,52 @@ interface PreviewItem {
 
 export default function CargaReposo() {
   const navigate = useNavigate();
-  const [file, setFile] = useState<File | null>(null);
+  const [fileSiniestros, setFileSiniestros] = useState<File | null>(null);
+  const [fileAccidentabilidad, setFileAccidentabilidad] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingProcessing, setLoadingProcessing] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   const [nuevos, setNuevos] = useState<PreviewItem[]>([]);
-  const [modificados, setModificados] = useState<PreviewItem[]>([]);
+  const [nuevosExistentes, setNuevosExistentes] = useState<PreviewItem[]>([]);
+  const [actualizados, setActualizados] = useState<PreviewItem[]>([]);
   const [ignorados, setIgnorados] = useState<PreviewItem[]>([]);
-  const [activeTab, setActiveTab] = useState<'nuevos' | 'modificados' | 'ignorados'>('nuevos');
+  const [activeTab, setActiveTab] = useState<'nuevos' | 'nuevos_existentes' | 'actualizados' | 'ignorados'>('nuevos');
   
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const resetResults = () => {
+    setNuevos([]);
+    setNuevosExistentes([]);
+    setActualizados([]);
+    setIgnorados([]);
+    setError('');
+    setSuccess('');
+  };
+
+  const handleFileSiniestrosChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setFile(e.target.files[0]);
-      setNuevos([]);
-      setModificados([]);
-      setIgnorados([]);
-      setError('');
-      setSuccess('');
+      setFileSiniestros(e.target.files[0]);
+      resetResults();
+    }
+  };
+
+  const handleFileAccidentabilidadChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setFileAccidentabilidad(e.target.files[0]);
+      resetResults();
     }
   };
 
   const handlePreview = async () => {
-    if (!file) {
-      setError('Por favor selecciona un archivo Excel primero.');
+    if (!fileSiniestros || !fileAccidentabilidad) {
+      setError('Por favor selecciona AMBOS archivos Excel (Siniestros y Accidentabilidad) antes de analizar.');
       return;
     }
 
     const token = localStorage.getItem('token');
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('fileSiniestros', fileSiniestros);
+    formData.append('fileAccidentabilidad', fileAccidentabilidad);
 
     setLoading(true);
     setError('');
@@ -60,7 +75,8 @@ export default function CargaReposo() {
       });
       
       setNuevos(res.data.data.nuevos);
-      setModificados(res.data.data.modificados);
+      setNuevosExistentes(res.data.data.nuevos_existentes);
+      setActualizados(res.data.data.actualizados);
       setIgnorados(res.data.data.ignorados);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Error procesando archivo');
@@ -70,7 +86,7 @@ export default function CargaReposo() {
   };
 
   const handleProcesar = async () => {
-    if (nuevos.length === 0 && modificados.length === 0) {
+    if (nuevos.length === 0 && nuevosExistentes.length === 0 && actualizados.length === 0) {
       setError('No hay registros nuevos ni modificados para procesar.');
       return;
     }
@@ -82,18 +98,21 @@ export default function CargaReposo() {
     try {
       const res = await axios.post('http://localhost:3001/api/reposo/procesar', {
         nuevos,
-        modificados,
-        fileName: file?.name,
-        userName: 'Admin' // Podría venir del token JWT
+        nuevos_existentes: nuevosExistentes,
+        actualizados,
+        fileName: fileSiniestros?.name,
+        userName: 'Admin'
       }, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
-      setSuccess(`¡Proceso exitoso! Se insertaron ${res.data.nuevos} registros nuevos y ${res.data.modificados} versiones modificadas.`);
+      setSuccess(`¡Proceso exitoso! Insertados Nuevos: ${res.data.nuevos}, Nuevos Reposos Existentes: ${res.data.nuevos_existentes}, Actualizaciones: ${res.data.actualizados}.`);
       setNuevos([]);
-      setModificados([]);
+      setNuevosExistentes([]);
+      setActualizados([]);
       setIgnorados([]);
-      setFile(null);
+      setFileSiniestros(null);
+      setFileAccidentabilidad(null);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Error al guardar en la base de datos');
     } finally {
@@ -101,11 +120,39 @@ export default function CargaReposo() {
     }
   };
 
-  const renderTable = (data: PreviewItem[], isModified: boolean = false) => {
+  const formatDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return '-';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1]}-${parts[0]}`; // YYYY-MM-DD to DD-MM-YYYY
+    }
+    return dateStr;
+  };
+
+  const exportToExcel = (data: PreviewItem[], fileName: string) => {
+    import('xlsx').then(xlsx => {
+      const ws = xlsx.utils.json_to_sheet(data);
+      const wb = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(wb, ws, "Datos");
+      xlsx.writeFile(wb, `Reposo_${fileName}.xlsx`);
+    });
+  };
+
+  const renderTable = (data: PreviewItem[], isModified: boolean = false, tabName: string) => {
     if (data.length === 0) return <p className="text-gray-500 py-4">No hay registros en esta categoría.</p>;
 
     return (
-      <div className="overflow-auto max-h-[500px] border border-gray-200 rounded-lg">
+      <div className="flex flex-col gap-2">
+        <div className="flex justify-end">
+          <button 
+            onClick={() => exportToExcel(data, tabName)}
+            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded border border-gray-300 flex items-center gap-1 font-semibold"
+          >
+            <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            Exportar Excel
+          </button>
+        </div>
+        <div className="overflow-auto max-h-[500px] border border-gray-200 rounded-lg">
         <table className="w-full text-left text-sm whitespace-nowrap">
           <thead className="sticky top-0 bg-gray-100 z-10 shadow-sm">
             <tr className="text-gray-700 font-bold uppercase text-xs">
@@ -131,21 +178,22 @@ export default function CargaReposo() {
                 <td className="p-3 truncate max-w-xs" title={row.Nombre}>{row.Nombre}</td>
                 <td className="p-3 text-center">{row.NumDias}</td>
                 <td className={`p-3 ${isModified && row.Desde !== row.DbDesde ? 'bg-green-100 font-bold text-green-800' : ''}`}>
-                  {row.Desde || '-'}
+                  {formatDate(row.Desde)}
                 </td>
                 <td className={`p-3 ${isModified && row.Hasta !== row.DbHasta ? 'bg-green-100 font-bold text-green-800' : ''}`}>
-                  {row.Hasta || '-'}
+                  {formatDate(row.Hasta)}
                 </td>
                 {isModified && (
                   <>
-                    <td className="p-3 bg-red-50 border-l border-red-100 text-red-600 line-through opacity-70">{row.DbDesde || '-'}</td>
-                    <td className="p-3 bg-red-50 text-red-600 line-through opacity-70">{row.DbHasta || '-'}</td>
+                    <td className="p-3 bg-red-50 border-l border-red-100 text-red-600 line-through opacity-70">{formatDate(row.DbDesde)}</td>
+                    <td className="p-3 bg-red-50 text-red-600 line-through opacity-70">{formatDate(row.DbHasta)}</td>
                   </>
                 )}
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     );
   };
@@ -156,24 +204,34 @@ export default function CargaReposo() {
       
       {/* Zona de Carga */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-[#e2e8f0] mb-8">
-        <h3 className="text-lg font-semibold text-[#016098] mb-4">Paso 1: Subir Archivo Excel</h3>
-        <p className="text-sm text-gray-500 mb-6">
-          El sistema detectará automáticamente el formato del archivo al leer la cabecera.
-        </p>
+        <h2 className="text-xl font-semibold text-gray-700 mb-4">Paso 1: Cargar Archivos ACHS</h2>
+        <p className="text-gray-500 mb-4 text-sm">Sube el archivo de Siniestros y el de Accidentabilidad para cruzarlos automáticamente.</p>
         
-        <div className="flex items-center gap-4">
-          <input 
-            type="file" 
-            accept=".xlsx, .xls" 
-            onChange={handleFileChange}
-            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-          />
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Archivo de Siniestros:</label>
+            <input 
+              type="file" 
+              accept=".xlsx, .xls" 
+              onChange={handleFileSiniestrosChange}
+              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Archivo Planilla Accidentabilidad:</label>
+            <input 
+              type="file" 
+              accept=".xlsx, .xls" 
+              onChange={handleFileAccidentabilidadChange}
+              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            />
+          </div>
           <button 
             onClick={handlePreview}
-            disabled={!file || loading}
-            className="bg-[#013565] text-white px-6 py-2 rounded font-bold whitespace-nowrap disabled:bg-gray-400 hover:bg-[#024a8d] transition"
+            disabled={!fileSiniestros || !fileAccidentabilidad || loading}
+            className="bg-[#013565] text-white px-6 py-2 rounded font-bold whitespace-nowrap disabled:bg-gray-400 hover:bg-[#024a8d] transition self-start mt-2"
           >
-            {loading ? 'Analizando...' : 'Analizar Archivo'}
+            {loading ? 'Analizando...' : 'Analizar Archivos'}
           </button>
         </div>
 
@@ -182,34 +240,40 @@ export default function CargaReposo() {
       </div>
 
       {/* Resultados de Análisis */}
-      {(nuevos.length > 0 || modificados.length > 0 || ignorados.length > 0) && (
+      {(nuevos.length > 0 || nuevosExistentes.length > 0 || actualizados.length > 0 || ignorados.length > 0) && (
         <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-lg font-semibold text-gray-700">Paso 2: Revisión y Procesamiento</h3>
             <button 
               onClick={handleProcesar}
-              disabled={loadingProcessing || (nuevos.length === 0 && modificados.length === 0)}
+              disabled={loadingProcessing || (nuevos.length === 0 && nuevosExistentes.length === 0 && actualizados.length === 0)}
               className="bg-green-600 text-white px-6 py-2 rounded font-bold shadow-md hover:bg-green-700 disabled:bg-gray-400 transition"
             >
               {loadingProcessing ? 'Guardando...' : 'Confirmar e Insertar a Base de Datos'}
             </button>
           </div>
           
-          <div className="flex gap-2 border-b border-gray-200 mb-4">
+          <div className="flex gap-2 border-b border-gray-200 mb-4 overflow-x-auto pb-2">
             <button 
-              className={`px-4 py-2 font-semibold text-sm ${activeTab === 'nuevos' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`px-4 py-2 font-semibold text-sm whitespace-nowrap ${activeTab === 'nuevos' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
               onClick={() => setActiveTab('nuevos')}
             >
               Nuevos ({nuevos.length})
             </button>
             <button 
-              className={`px-4 py-2 font-semibold text-sm ${activeTab === 'modificados' ? 'border-b-2 border-orange-500 text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
-              onClick={() => setActiveTab('modificados')}
+              className={`px-4 py-2 font-semibold text-sm whitespace-nowrap ${activeTab === 'nuevos_existentes' ? 'border-b-2 border-orange-500 text-orange-600' : 'text-gray-500 hover:text-gray-700'}`}
+              onClick={() => setActiveTab('nuevos_existentes')}
             >
-              Modificados ({modificados.length})
+              Nuevo Reposo Existente ({nuevosExistentes.length})
             </button>
             <button 
-              className={`px-4 py-2 font-semibold text-sm ${activeTab === 'ignorados' ? 'border-b-2 border-gray-500 text-gray-600' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`px-4 py-2 font-semibold text-sm whitespace-nowrap ${activeTab === 'actualizados' ? 'border-b-2 border-teal-500 text-teal-600' : 'text-gray-500 hover:text-gray-700'}`}
+              onClick={() => setActiveTab('actualizados')}
+            >
+              Actualiza Fecha Termino ({actualizados.length})
+            </button>
+            <button 
+              className={`px-4 py-2 font-semibold text-sm whitespace-nowrap ${activeTab === 'ignorados' ? 'border-b-2 border-gray-500 text-gray-600' : 'text-gray-500 hover:text-gray-700'}`}
               onClick={() => setActiveTab('ignorados')}
             >
               Sin Cambios ({ignorados.length})
@@ -217,9 +281,10 @@ export default function CargaReposo() {
           </div>
 
           <div>
-            {activeTab === 'nuevos' && renderTable(nuevos, false)}
-            {activeTab === 'modificados' && renderTable(modificados, true)}
-            {activeTab === 'ignorados' && renderTable(ignorados, false)}
+            {activeTab === 'nuevos' && renderTable(nuevos, false, 'nuevos')}
+            {activeTab === 'nuevos_existentes' && renderTable(nuevosExistentes, true, 'nuevos_existentes')}
+            {activeTab === 'actualizados' && renderTable(actualizados, true, 'actualizados')}
+            {activeTab === 'ignorados' && renderTable(ignorados, false, 'ignorados')}
           </div>
         </div>
       )}

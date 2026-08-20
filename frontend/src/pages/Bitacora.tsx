@@ -8,6 +8,7 @@ interface BitacoraItem {
   TotalRegistros: number;
   RegistrosNuevos: number;
   RegistrosActualizados: number;
+  RegistrosNuevosReposos: number;
   Usuario: string;
 }
 
@@ -32,6 +33,23 @@ export default function Bitacora() {
       setError('Error al cargar la auditoría');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRollback = async (id: number) => {
+    if (!window.confirm('¿Estás seguro que deseas deshacer esta carga? Esto eliminará todos los registros nuevos y revertirá las fechas de los registros actualizados.')) {
+      return;
+    }
+    
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(`http://localhost:3001/api/reposo/rollback/${id}`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      alert(res.data.message);
+      fetchBitacora();
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Error al deshacer la carga');
     }
   };
 
@@ -77,9 +95,11 @@ export default function Bitacora() {
                   <th className="p-4">Fecha de Proceso</th>
                   <th className="p-4">Nombre del Archivo</th>
                   <th className="p-4 text-center">Registros Leídos</th>
-                  <th className="p-4 text-center text-green-700 bg-green-50 border-l border-green-100">Registros Nuevos</th>
-                  <th className="p-4 text-center text-orange-700 bg-orange-50">Versiones Modificadas</th>
+                  <th className="p-4 text-center text-green-700 bg-green-50 border-l border-green-100">Nuevos</th>
+                  <th className="p-4 text-center text-orange-700 bg-orange-50">Nuevos (Existentes)</th>
+                  <th className="p-4 text-center text-teal-700 bg-teal-50">Actualizados</th>
                   <th className="p-4 text-right">Usuario</th>
+                  <th className="p-4 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-sm">
@@ -95,10 +115,23 @@ export default function Bitacora() {
                       +{row.RegistrosNuevos}
                     </td>
                     <td className="p-4 text-center font-bold text-orange-600 bg-orange-50">
-                      {row.RegistrosActualizados > 0 ? `+${row.RegistrosActualizados}` : '0'}
+                      {row.RegistrosNuevosReposos > 0 ? `+${row.RegistrosNuevosReposos}` : '0'}
+                    </td>
+                    <td className="p-4 text-center font-bold text-teal-600 bg-teal-50">
+                      {row.RegistrosActualizados > 0 ? `^${row.RegistrosActualizados}` : '0'}
                     </td>
                     <td className="p-4 text-right text-gray-600 uppercase text-xs font-bold tracking-wider">
                       {row.Usuario}
+                    </td>
+                    <td className="p-4 text-center">
+                      {!row.NombreArchivo.includes('(REVERTIDO)') && (
+                        <button
+                          onClick={() => handleRollback(row.Id)}
+                          className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded border border-red-300 font-bold"
+                        >
+                          Deshacer
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

@@ -43,6 +43,8 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
   const [codSalud, setCodSalud] = useState('');
   const [mutualidad, setMutualidad] = useState('');
   const [vigencia, setVigencia] = useState('');
+  const [tipoSiniestro, setTipoSiniestro] = useState('');
+  const [tipoAlta, setTipoAlta] = useState('');
 
   const [dominios, setDominios] = useState<{salud: any[], unidades: any[]}>({ salud: [], unidades: [] });
   const [viewingDetail, setViewingDetail] = useState<'universo' | 'pagadas' | 'impagas' | null>(null);
@@ -80,7 +82,9 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
           codSalud,
           mutualidad,
           vigencia,
-          modulo
+          modulo,
+          tipoSiniestro,
+          tipoAlta
         },
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -100,7 +104,7 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
   useEffect(() => {
     fetchStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, navigate, startYear, sector, codUnidad, codSalud, mutualidad, vigencia, modulo]);
+  }, [year, navigate, startYear, sector, codUnidad, codSalud, mutualidad, vigencia, modulo, tipoSiniestro, tipoAlta]);
 
   const loadDetalle = async (type: 'universo' | 'pagadas' | 'impagas') => {
     const token = localStorage.getItem('token');
@@ -117,7 +121,9 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
           codSalud,
           mutualidad,
           vigencia,
-          modulo
+          modulo,
+          tipoSiniestro,
+          tipoAlta
         },
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -201,6 +207,8 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
               setCodSalud('');
               setVigencia('');
               setMutualidad('');
+              setTipoSiniestro('');
+              setTipoAlta('');
             }}
             className="text-sm text-red-500 hover:text-red-700 font-semibold border border-red-200 px-3 py-1 rounded bg-red-50"
           >
@@ -300,18 +308,50 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
               </select>
             </div>
           ) : (
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Mutualidad</label>
-              <select 
-                value={mutualidad} 
-                onChange={(e) => setMutualidad(e.target.value)}
-                className="w-full border border-gray-300 rounded p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#016098]"
-              >
-                <option value="">Todas</option>
-                <option value="ACHS">ACHS</option>
-                <option value="Mutual">Mutual</option>
-              </select>
-            </div>
+            <>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Mutualidad</label>
+                <select 
+                  value={mutualidad} 
+                  onChange={(e) => setMutualidad(e.target.value)}
+                  className="w-full border border-gray-300 rounded p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#016098]"
+                >
+                  <option value="">Todas</option>
+                  <option value="ACHS">ACHS</option>
+                  <option value="Mutual">Mutual</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Tipo Siniestro</label>
+                <select 
+                  value={tipoSiniestro} 
+                  onChange={(e) => setTipoSiniestro(e.target.value)}
+                  className="w-full border border-gray-300 rounded p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#016098]"
+                >
+                  <option value="">Todos</option>
+                  <option value="No Ley">No Ley</option>
+                  <option value="Trabajo">Trabajo</option>
+                  <option value="Trayecto">Trayecto</option>
+                  <option value="Enfermedad Profesional">Enfermedad Profesional</option>
+                  <option value="Incidente sin lesión">Incidente sin lesión</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Tipo de Alta</label>
+                <select 
+                  value={tipoAlta} 
+                  onChange={(e) => setTipoAlta(e.target.value)}
+                  className="w-full border border-gray-300 rounded p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#016098]"
+                >
+                  <option value="">Todos</option>
+                  <option value="ADF">Alta Diferida (ADF)</option>
+                  <option value="ADI">Alta Día (ADI)</option>
+                  <option value="AIN">Alta Inmediata (AIN)</option>
+                  <option value="TAD">Término Rep. Admin (TAD)</option>
+                  <option value="TIN">Término Rep. Inasi (TIN)</option>
+                </select>
+              </div>
+            </>
           )}
 
           <div>
