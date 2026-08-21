@@ -16,6 +16,7 @@ export default function Bitacora() {
   const [data, setData] = useState<BitacoraItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [rollingBackId, setRollingBackId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchBitacora();
@@ -25,7 +26,7 @@ export default function Bitacora() {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:3001/api/reposo/auditoria', {
+      const response = await axios.get('/api/reposo/auditoria', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setData(response.data.data);
@@ -42,14 +43,17 @@ export default function Bitacora() {
     }
     
     try {
+      setRollingBackId(id);
       const token = localStorage.getItem('token');
-      const res = await axios.post(`http://localhost:3001/api/reposo/rollback/${id}`, {}, {
+      const res = await axios.post(`/api/reposo/rollback/${id}`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
       alert(res.data.message);
-      fetchBitacora();
+      window.location.reload();
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Error al deshacer la carga');
+      alert(err.response?.data?.error || 'Error al revertir la carga');
+    } finally {
+      setRollingBackId(null);
     }
   };
 
@@ -103,38 +107,60 @@ export default function Bitacora() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-sm">
-                {data.map((row) => (
-                  <tr key={row.Id} className="hover:bg-blue-50 transition">
-                    <td className="p-4 text-gray-500 font-semibold">#{row.Id}</td>
-                    <td className="p-4 font-semibold text-[#013565]">{row.FechaProceso}</td>
-                    <td className="p-4 text-gray-700 max-w-xs truncate" title={row.NombreArchivo}>
-                      {row.NombreArchivo}
-                    </td>
-                    <td className="p-4 text-center font-bold text-gray-600">{row.TotalRegistros}</td>
-                    <td className="p-4 text-center font-bold text-green-600 bg-green-50 border-l border-green-100">
-                      +{row.RegistrosNuevos}
-                    </td>
-                    <td className="p-4 text-center font-bold text-orange-600 bg-orange-50">
-                      {row.RegistrosNuevosReposos > 0 ? `+${row.RegistrosNuevosReposos}` : '0'}
-                    </td>
-                    <td className="p-4 text-center font-bold text-teal-600 bg-teal-50">
-                      {row.RegistrosActualizados > 0 ? `^${row.RegistrosActualizados}` : '0'}
-                    </td>
-                    <td className="p-4 text-right text-gray-600 uppercase text-xs font-bold tracking-wider">
-                      {row.Usuario}
-                    </td>
-                    <td className="p-4 text-center">
-                      {!row.NombreArchivo.includes('(REVERTIDO)') && (
-                        <button
-                          onClick={() => handleRollback(row.Id)}
-                          className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded border border-red-300 font-bold"
-                        >
-                          Deshacer
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {data.map((row) => {
+                  const isReverted = row.NombreArchivo.includes('(REVERTIDO)');
+                  const cleanName = row.NombreArchivo.replace('(REVERTIDO)', '').trim();
+                  const files = cleanName.split('|').map(s => s.trim());
+                  
+                  return (
+                    <tr key={row.Id} className={`transition ${isReverted ? 'bg-red-50' : 'hover:bg-blue-50'}`}>
+                      <td className="p-4 text-gray-500 font-semibold">#{row.Id}</td>
+                      <td className="p-4 font-semibold text-[#013565]">{row.FechaProceso}</td>
+                      <td className="p-4 text-gray-700 max-w-xs" title={cleanName}>
+                        <div className="flex flex-col gap-1">
+                          {files.map((file, i) => (
+                            <span key={i} className={`truncate text-xs ${isReverted ? 'line-through text-red-400' : ''}`}>
+                              📄 {file}
+                            </span>
+                          ))}
+                          {isReverted && (
+                            <span className="text-[10px] font-bold text-red-600 bg-red-100 border border-red-200 px-2 py-0.5 rounded-full w-max mt-1">
+                              ELIMINADO / REVERTIDO
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4 text-center font-bold text-gray-600">{row.TotalRegistros}</td>
+                      <td className="p-4 text-center font-bold text-green-600 bg-green-50 border-l border-green-100">
+                        +{row.RegistrosNuevos}
+                      </td>
+                      <td className="p-4 text-center font-bold text-orange-600 bg-orange-50">
+                        {row.RegistrosNuevosReposos > 0 ? `+${row.RegistrosNuevosReposos}` : '0'}
+                      </td>
+                      <td className="p-4 text-center font-bold text-teal-600 bg-teal-50">
+                        {row.RegistrosActualizados > 0 ? `^${row.RegistrosActualizados}` : '0'}
+                      </td>
+                      <td className="p-4 text-right text-gray-600 uppercase text-xs font-bold tracking-wider">
+                        {row.Usuario}
+                      </td>
+                      <td className="p-4 text-center">
+                        {!isReverted && (
+                          <button
+                            onClick={() => handleRollback(row.Id)}
+                            disabled={rollingBackId === row.Id}
+                            className={`text-xs px-3 py-1 rounded border font-bold ${
+                              rollingBackId === row.Id 
+                              ? 'bg-gray-100 text-gray-400 border-gray-300' 
+                              : 'bg-red-100 hover:bg-red-200 text-red-700 border-red-300'
+                            }`}
+                          >
+                            {rollingBackId === row.Id ? 'Revirtiendo...' : 'Deshacer'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

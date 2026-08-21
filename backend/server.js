@@ -75,6 +75,39 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // Dashboard stats endpoint
+
+app.get('/api/dashboard/inicio-stats', async (req, res) => {
+    try {
+        const pool = await getConnection();
+        const year = req.query.year;
+        
+        let yearFilter = '';
+        if (year && year !== '') {
+            yearFilter = ` AND YEAR(Desde) = @Year`;
+        }
+
+        const query = `
+            SELECT 
+                SUM(CASE WHEN RTRIM(ISNULL(PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Convenio,
+                SUM(CASE WHEN RTRIM(ISNULL(PagoDirecto, '')) = 'Pago Directo' THEN 1 ELSE 0 END) as PagoDirecto,
+                SUM(CASE WHEN RTRIM(ISNULL(PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo
+            FROM LIC_LICENCIA_ACTUAL
+            WHERE 1=1 ${yearFilter}
+        `;
+        
+        const request = pool.request();
+        if (year && year !== '') {
+            request.input('Year', sql.Int, parseInt(year));
+        }
+        
+        const result = await request.query(query);
+        res.json({ status: 'ok', data: result.recordset[0] });
+    } catch (err) {
+        console.error('Inicio Stats error:', err);
+        res.status(500).json({ status: 'error', message: 'Error obteniendo estadisticas de inicio' });
+    }
+});
+
 app.get('/api/dashboard/stats', async (req, res) => {
     try {
         const pool = await getConnection();
@@ -85,6 +118,8 @@ app.get('/api/dashboard/stats', async (req, res) => {
         let condition = `NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')`;
         if (modulo === 'reposo') {
             condition = `IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')`;
+        } else if (modulo === 'pago-directo') {
+            condition = `= 'Pago Directo'`;
         }
 
         let baseFromAndJoins = `
@@ -131,8 +166,12 @@ app.get('/api/dashboard/stats', async (req, res) => {
             reqDb.input('Vigencia', sql.VarChar, vigencia);
         }
         if (tipoSiniestro) {
-            filters += " AND RTRIM(ISNULL(L.Tipo_enferm, '')) = @TipoSiniestro ";
-            reqDb.input('TipoSiniestro', sql.VarChar, tipoSiniestro);
+            if (modulo === 'reposo') {
+                filters += " AND RTRIM(ISNULL(L.Tipo_Siniestro, '')) = @TipoSiniestro ";
+            } else {
+                filters += " AND RTRIM(ISNULL(L.Tipo_enferm, '')) = @TipoSiniestro ";
+            }
+            reqDb.input('TipoSiniestro', sql.NVarChar, tipoSiniestro);
         }
         if (tipoAlta) {
             filters += " AND RTRIM(ISNULL(L.altaAchs, '')) = @TipoAlta ";
@@ -155,10 +194,10 @@ app.get('/api/dashboard/stats', async (req, res) => {
         const qUniverso = await reqDb.query(buildQuery(""));
 
         // 2. Licencias pagadas
-        const qPagadas = await reqDb.query(buildQuery("AND L.NumeroLicencia IN (SELECT b.NumeroLicencia FROM LIC_DETALLE_PAGO_ACTUAL b)"));
+        const qPagadas = await reqDb.query(buildQuery("AND EXISTS (SELECT 1 FROM LIC_DETALLE_PAGO_ACTUAL b WHERE b.NumeroLicencia = L.NumeroLicencia)"));
 
         // 3. Licencias NO pagadas (Impagas)
-        const qNoPagadas = await reqDb.query(buildQuery("AND L.NumeroLicencia NOT IN (SELECT b.NumeroLicencia FROM LIC_DETALLE_PAGO_ACTUAL b)"));
+        const qNoPagadas = await reqDb.query(buildQuery("AND NOT EXISTS (SELECT 1 FROM LIC_DETALLE_PAGO_ACTUAL b WHERE b.NumeroLicencia = L.NumeroLicencia)"));
 
         // 4. Agrupación por Sector
         const qSector = await reqDb.query(`
@@ -226,6 +265,153 @@ app.get('/api/dashboard/stats', async (req, res) => {
     }
 });
 
+
+// Dashboard advanced stats endpoint
+app.get('/api/dashboard/advanced-stats', async (req, res) => {
+    try {
+        const pool = await getConnection();
+        const { year, startYear, sector, codUnidad, codSalud, vigencia, modulo, mutualidad, tipoSiniestro, tipoAlta } = req.query;
+        
+        const reqDb = pool.request();
+
+        let condition = "NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')";
+        if (modulo === 'reposo') {
+            condition = "IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')";
+        } else if (modulo === 'pago-directo') {
+            condition = "= 'Pago Directo'";
+        }
+
+        let baseFromAndJoins = `
+            FROM LIC_LICENCIA_ACTUAL L
+            LEFT JOIN LIC_HISTORICO_PREVISION_ACTUAL HPA 
+                ON HPA.Rut = L.RutFuncionario 
+                AND HPA.Anio = YEAR(L.Desde) 
+                AND HPA.Mes = MONTH(L.Desde)
+            LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
+            LEFT JOIN LIC_SALUD S ON HPA.CodSalud = S.CodSalud
+            LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
+        `;
+
+        let filters = "";
+        if (year) {
+            filters += " AND YEAR(L.Desde) = @Year ";
+            reqDb.input('Year', require('mssql').Int, parseInt(year, 10));
+        }
+        if (startYear) {
+            filters += " AND YEAR(L.Desde) >= @StartYear ";
+            reqDb.input('StartYear', require('mssql').Int, parseInt(startYear, 10));
+        }
+        if (sector === 'educacion') {
+            filters += " AND F.CodUnidad < 600 ";
+        } else if (sector === 'salud') {
+            filters += " AND F.CodUnidad >= 600 ";
+        }
+        if (codUnidad) {
+            filters += " AND F.CodUnidad = @CodUnidad ";
+            reqDb.input('CodUnidad', require('mssql').Int, parseInt(codUnidad, 10));
+        }
+        if (codSalud && modulo !== 'reposo') {
+            filters += " AND S.CodSalud = @CodSalud ";
+            reqDb.input('CodSalud', require('mssql').Int, parseInt(codSalud, 10));
+        }
+        if (mutualidad && modulo === 'reposo') {
+            if (mutualidad === 'ACHS') {
+                filters += " AND RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR') ";
+            } else if (mutualidad === 'Mutual') {
+                filters += " AND RTRIM(ISNULL(L.PagoDirecto, '')) IN ('Mutual', 'Mutual OR') ";
+            }
+        }
+        if (vigencia) {
+            filters += " AND F.vigencia = @Vigencia ";
+            reqDb.input('Vigencia', require('mssql').VarChar, vigencia);
+        }
+        if (tipoSiniestro) {
+            if (modulo === 'reposo') {
+                filters += " AND RTRIM(ISNULL(L.Tipo_Siniestro, '')) = @TipoSiniestro ";
+            } else {
+                filters += " AND RTRIM(ISNULL(L.Tipo_enferm, '')) = @TipoSiniestro ";
+            }
+            reqDb.input('TipoSiniestro', require('mssql').NVarChar, tipoSiniestro);
+        }
+        if (tipoAlta) {
+            filters += " AND RTRIM(ISNULL(L.altaAchs, '')) = @TipoAlta ";
+            reqDb.input('TipoAlta', require('mssql').VarChar, tipoAlta);
+        }
+
+        const baseWhere = `WHERE RTRIM(ISNULL(L.PagoDirecto, '')) ${condition} ${filters}`;
+
+        // 1. Evolucion Mensual
+        const qEvolucion = await reqDb.query(`
+            SELECT 
+                MONTH(L.Desde) as Mes,
+                COUNT(DISTINCT L.NumeroLicencia) as Cantidad,
+                SUM(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) as TotalMonto
+            ${baseFromAndJoins}
+            ${baseWhere}
+            GROUP BY MONTH(L.Desde)
+            ORDER BY MONTH(L.Desde) ASC
+        `);
+
+        // 2. Top 10 Siniestros/Enfermedades
+        const qSiniestros = await reqDb.query(`
+            SELECT TOP 10
+                ISNULL(NULLIF(RTRIM(L.Tipo_Siniestro), ''), ISNULL(NULLIF(RTRIM(L.Tipo_enferm), ''), 'Sin Especificar')) as Motivo,
+                COUNT(DISTINCT L.NumeroLicencia) as Cantidad
+            ${baseFromAndJoins}
+            ${baseWhere}
+            GROUP BY ISNULL(NULLIF(RTRIM(L.Tipo_Siniestro), ''), ISNULL(NULLIF(RTRIM(L.Tipo_enferm), ''), 'Sin Especificar'))
+            ORDER BY Cantidad DESC
+        `);
+
+        // 3. Distribucion por Rangos de Dias
+        const qDias = await reqDb.query(`
+            SELECT 
+                RangoDias as Rango,
+                COUNT(*) as Cantidad
+            FROM (
+                SELECT 
+                    L.NumeroLicencia,
+                    MAX(ISNULL(L.NumDias, 0)) as Dias,
+                    CASE 
+                        WHEN MAX(ISNULL(L.NumDias, 0)) BETWEEN 1 AND 3 THEN '1-3 Días'
+                        WHEN MAX(ISNULL(L.NumDias, 0)) BETWEEN 4 AND 7 THEN '4-7 Días'
+                        WHEN MAX(ISNULL(L.NumDias, 0)) BETWEEN 8 AND 15 THEN '8-15 Días'
+                        ELSE '16+ Días'
+                    END as RangoDias
+                ${baseFromAndJoins}
+                ${baseWhere}
+                GROUP BY L.NumeroLicencia
+            ) T
+            GROUP BY RangoDias
+        `);
+
+        // 4. Top 10 Establecimientos
+        const qEstablecimientos = await reqDb.query(`
+            SELECT TOP 10
+                ISNULL(RTRIM(E.Descripcion), 'Sin Establecimiento') as Establecimiento,
+                COUNT(DISTINCT L.NumeroLicencia) as Cantidad,
+                SUM(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) as TotalMonto
+            ${baseFromAndJoins}
+            ${baseWhere}
+            GROUP BY ISNULL(RTRIM(E.Descripcion), 'Sin Establecimiento')
+            ORDER BY Cantidad DESC
+        `);
+
+        res.json({ 
+            status: 'ok', 
+            data: {
+                evolucion: qEvolucion.recordset,
+                siniestros: qSiniestros.recordset,
+                dias: qDias.recordset,
+                establecimientos: qEstablecimientos.recordset
+            }
+        });
+    } catch (error) {
+        console.error('Advanced Stats error:', error);
+        res.status(500).json({ status: 'error', message: 'Error obteniendo estadisticas avanzadas' });
+    }
+});
+
 // Endpoint para dominios (Combos de filtros)
 app.get('/api/dominios', async (req, res) => {
     try {
@@ -254,6 +440,8 @@ app.get('/api/licencias/detalle', async (req, res) => {
         let condition = `NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')`;
         if (modulo === 'reposo') {
             condition = `IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')`;
+        } else if (modulo === 'pago-directo') {
+            condition = `= 'Pago Directo'`;
         }
 
         let query = `
@@ -334,8 +522,12 @@ app.get('/api/licencias/detalle', async (req, res) => {
             request.input('Vigencia', sql.VarChar, vigencia);
         }
         if (tipoSiniestro) {
-            query += " AND RTRIM(ISNULL(L.Tipo_enferm, '')) = @TipoSiniestro ";
-            request.input('TipoSiniestro', sql.VarChar, tipoSiniestro);
+            if (modulo === 'reposo') {
+                query += " AND RTRIM(ISNULL(L.Tipo_Siniestro, '')) = @TipoSiniestro ";
+            } else {
+                query += " AND RTRIM(ISNULL(L.Tipo_enferm, '')) = @TipoSiniestro ";
+            }
+            request.input('TipoSiniestro', sql.NVarChar, tipoSiniestro);
         }
         if (tipoAlta) {
             query += " AND RTRIM(ISNULL(L.altaAchs, '')) = @TipoAlta ";
@@ -344,9 +536,9 @@ app.get('/api/licencias/detalle', async (req, res) => {
 
         // Condición para el tipo de detalle
         if (type === 'pagadas') {
-            query += ` AND L.NumeroLicencia IN (SELECT DISTINCT NumeroLicencia FROM LIC_DETALLE_PAGO_ACTUAL) `;
+            query += ` AND EXISTS (SELECT 1 FROM LIC_DETALLE_PAGO_ACTUAL b WHERE b.NumeroLicencia = L.NumeroLicencia) `;
         } else if (type === 'impagas') {
-            query += ` AND L.NumeroLicencia NOT IN (SELECT b.NumeroLicencia FROM LIC_DETALLE_PAGO_ACTUAL b) `;
+            query += ` AND NOT EXISTS (SELECT 1 FROM LIC_DETALLE_PAGO_ACTUAL b WHERE b.NumeroLicencia = L.NumeroLicencia) `;
         }
 
         query += `
@@ -371,7 +563,7 @@ app.get('/api/licencias/detalle', async (req, res) => {
 // Catch-all para que React Router funcione con URLs directas
 app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api/')) {
-        res.sendFile(path.join(__dirname, 'public', 'index.html'));
+        res.sendFile('index.html', { root: path.join(__dirname, 'public') });
     } else {
         next();
     }

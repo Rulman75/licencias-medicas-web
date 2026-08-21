@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
+import OtrasEstadisticas from './OtrasEstadisticas';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from 'recharts';
 
 interface GroupStat {
@@ -37,7 +38,7 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
   
   // Filtros
   const [year, setYear] = useState('');
-  const [startYear, setStartYear] = useState('2020'); 
+  const [startYear, setStartYear] = useState('');
   const [sector, setSector] = useState('');
   const [codUnidad, setCodUnidad] = useState('');
   const [codSalud, setCodSalud] = useState('');
@@ -291,7 +292,7 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
             </select>
           </div>
           
-          {modulo === 'licencias' ? (
+          {modulo === 'licencias' || modulo === 'pago-directo' ? (
             <div>
               <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Entidad de Salud</label>
               <select 
@@ -389,6 +390,8 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
               </button>
             </div>
 
+{modulo !== 'pago-directo' && (
+              <>
             <div className="bg-white rounded-lg shadow p-6 border-l-4 border-green-500 flex flex-col justify-between">
               <div>
                 <h2 className="text-gray-500 text-sm font-bold uppercase tracking-wide">Licencias Pagadas</h2>
@@ -422,10 +425,12 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
                 Ver Detalle Impagas
               </button>
             </div>
+              </>
+            )}
           </div>
           
           {/* Fila de Gráficos Secundarios */}
-          {!viewingDetail && stats && (
+          {!viewingDetail && stats && modulo !== 'pago-directo' && (
             <div className={`grid grid-cols-1 ${modulo === 'licencias' && stats.porSector ? 'md:grid-cols-3' : 'md:grid-cols-1'} gap-6 mb-8`}>
               
               {/* Gráfico Torta: Composición */}
@@ -468,10 +473,10 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
                           cursor={{fill: '#f1f5f9'}} 
                           contentStyle={{borderRadius: '8px'}}
                           formatter={(value: any, name: any, props: any) => {
-                            if (name === 'Pagadas') {
+                            if (name === 'Pagadas' && modulo !== 'pago-directo') {
                               return [`${value} (Monto: ${formatCurrency(props.payload.PagadasMonto)})`, 'Pagadas'];
                             }
-                            if (name === 'Impagas') {
+                            if (name === 'Impagas' && modulo !== 'pago-directo') {
                               return [`${value} (Monto: ${formatCurrency(props.payload.ImpagasMonto)})`, 'Impagas'];
                             }
                             return [value, name];
@@ -499,10 +504,10 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
                           cursor={{fill: '#f1f5f9'}} 
                           contentStyle={{borderRadius: '8px'}}
                           formatter={(value: any, name: any, props: any) => {
-                            if (name === 'Pagadas') {
+                            if (name === 'Pagadas' && modulo !== 'pago-directo') {
                               return [`${value} (Monto: ${formatCurrency(props.payload.PagadasMonto)})`, 'Pagadas'];
                             }
-                            if (name === 'Impagas') {
+                            if (name === 'Impagas' && modulo !== 'pago-directo') {
                               return [`${value} (Monto: ${formatCurrency(props.payload.ImpagasMonto)})`, 'Impagas'];
                             }
                             return [value, name];
@@ -607,6 +612,13 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
               )}
             </div>
           )}
+      
+      {modulo === 'pago-directo' && (
+        <div className="mt-12 border-t border-gray-200 pt-8">
+          <h2 className="text-xl font-bold text-[#016098] mb-6">Análisis Detallado</h2>
+          <OtrasEstadisticas modulo="pago-directo" />
+        </div>
+      )}
       </div>
     </div>
   );

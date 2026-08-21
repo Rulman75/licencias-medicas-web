@@ -50,6 +50,18 @@ router.post('/preview', upload.fields([{ name: 'fileSiniestros', maxCount: 1 }, 
             return res.status(400).json({ error: 'Debes subir ambos archivos (Siniestros y Accidentabilidad).' });
         }
 
+        const pool = req.db;
+        
+        // 0. Check if already processed
+        const combinedFileName = `${req.files['fileSiniestros'][0].originalname} | ${req.files['fileAccidentabilidad'][0].originalname}`;
+        const reqCheck = await pool.request()
+            .input('FileName', sql.NVarChar, combinedFileName)
+            .query(`SELECT TOP 1 Id FROM LIC_BITACORA_ARCHIVOS WHERE NombreArchivo = @FileName`);
+            
+        if (reqCheck.recordset.length > 0) {
+            return res.status(400).json({ error: `Estos archivos ya fueron procesados previamente. Revisa la Bitácora de Cargas.` });
+        }
+
         // Leer Accidentabilidad
         const wbAcc = xlsx.read(req.files['fileAccidentabilidad'][0].buffer, { type: 'buffer' });
         const rowsAcc = xlsx.utils.sheet_to_json(wbAcc.Sheets[wbAcc.SheetNames[0]]);
@@ -68,7 +80,6 @@ router.post('/preview', upload.fields([{ name: 'fileSiniestros', maxCount: 1 }, 
 
         if (rowsSin.length === 0) return res.status(400).json({ error: 'El archivo de siniestros está vacío' });
 
-        const pool = req.db;
         const extractedData = [];
         const licenciasToCheck = [];
 
@@ -95,9 +106,11 @@ router.post('/preview', upload.fields([{ name: 'fileSiniestros', maxCount: 1 }, 
             const accRow = accMap[numero] || {};
             const obserApelacion = ((accRow['MOTIVO DE ASISTENCIA'] || '') + ' ' + (accRow['OBSERVACIONES'] || '')).trim();
             const altaAchs = mapTipoAlta(accRow['TIPO DE ALTA']);
+            const tipoSiniestroAcc = accRow['TIPO SINIESTRO'] || '';
 
             extractedData.push({
                 NumeroLicencia: numero,
+                Tipo_Siniestro: tipoSiniestroAcc,
                 RutFuncionario: rut,
                 Nombre: nombre,
                 Desde: desde,
@@ -226,6 +239,7 @@ router.post('/procesar', async (req, res) => {
                 reqDb.input('Recepcion', sql.Date, item.Recepcion || null);
                 reqDb.input('Remision', sql.Date, item.Recepcion || null);
                 reqDb.input('Tipo_enferm', sql.NVarChar, item.Tipo_enferm || '');
+                reqDb.input('Tipo_Siniestro', sql.NVarChar, item.Tipo_Siniestro || '');
                 reqDb.input('Obser_apelacion', sql.NVarChar, item.Obser_apelacion || '');
                 reqDb.input('altaAchs', sql.NVarChar, item.altaAchs || 'NI');
                 
@@ -234,7 +248,7 @@ router.post('/procesar', async (req, res) => {
                 await reqDb.query(`
                     INSERT INTO LIC_LICENCIA_ACTUAL (
                         NumeroLicencia, RutFuncionario, Desde, Hasta, NumDias,
-                        Recepcion, Remision, Tipo_enferm, Obser_apelacion, altaAchs,
+                        Recepcion, Remision, Tipo_enferm, Tipo_Siniestro, Obser_apelacion, altaAchs,
                         DiasAutorizados, CodDiagnostico, DetalleDiagnostico, Maternal, Rechazo, Parcial,
                         Observacion, MontoNetoPromedio, SubsidioDiario, PagoEstimado, RutMedico, nombreMedico,
                         regularizado, dv, PagoDirecto, Cod_Salud, Descuento, MontoDesc, Estado,
@@ -243,7 +257,7 @@ router.post('/procesar', async (req, res) => {
                         Observacion_CajaLA, Pendiente, PagoEstimadoOld
                     ) VALUES (
                         @NumeroLicencia, @RutFuncionario, @Desde, @Hasta, @NumDias,
-                        @Recepcion, @Remision, @Tipo_enferm, @Obser_apelacion, @altaAchs,
+                        @Recepcion, @Remision, @Tipo_enferm, @Tipo_Siniestro, @Obser_apelacion, @altaAchs,
                         NULL, NULL, '', 0, 0, 0,
                         'ACHS OR', NULL, NULL, NULL, '', '',
                         0, '', 'ACHS OR', '', 0, NULL, '',
@@ -306,6 +320,7 @@ router.post('/procesar', async (req, res) => {
                 reqDb.input('Recepcion', sql.Date, item.Recepcion || null);
                 reqDb.input('Remision', sql.Date, item.Recepcion || null);
                 reqDb.input('Tipo_enferm', sql.NVarChar, item.Tipo_enferm || '');
+                reqDb.input('Tipo_Siniestro', sql.NVarChar, item.Tipo_Siniestro || '');
                 reqDb.input('Obser_apelacion', sql.NVarChar, item.Obser_apelacion || '');
                 reqDb.input('altaAchs', sql.NVarChar, item.altaAchs || 'NI');
                 
@@ -314,7 +329,7 @@ router.post('/procesar', async (req, res) => {
                 await reqDb.query(`
                     INSERT INTO LIC_LICENCIA_ACTUAL (
                         NumeroLicencia, RutFuncionario, Desde, Hasta, NumDias,
-                        Recepcion, Remision, Tipo_enferm, Obser_apelacion, altaAchs,
+                        Recepcion, Remision, Tipo_enferm, Tipo_Siniestro, Obser_apelacion, altaAchs,
                         DiasAutorizados, CodDiagnostico, DetalleDiagnostico, Maternal, Rechazo, Parcial,
                         Observacion, MontoNetoPromedio, SubsidioDiario, PagoEstimado, RutMedico, nombreMedico,
                         regularizado, dv, PagoDirecto, Cod_Salud, Descuento, MontoDesc, Estado,
@@ -323,7 +338,7 @@ router.post('/procesar', async (req, res) => {
                         Observacion_CajaLA, Pendiente, PagoEstimadoOld
                     ) VALUES (
                         @NumeroLicencia, @RutFuncionario, @Desde, @Hasta, @NumDias,
-                        @Recepcion, @Remision, @Tipo_enferm, @Obser_apelacion, @altaAchs,
+                        @Recepcion, @Remision, @Tipo_enferm, @Tipo_Siniestro, @Obser_apelacion, @altaAchs,
                         NULL, NULL, '', 0, 0, 0,
                         'ACHS OR', NULL, NULL, NULL, '', '',
                         0, '', 'ACHS OR', '', 0, NULL, '',
@@ -439,50 +454,58 @@ router.post('/rollback/:id', async (req, res) => {
 
         const reqLogs = new sql.Request(transaction);
         reqLogs.input('IdB', sql.Int, id);
-        const logsRes = await reqLogs.query(`SELECT * FROM LIC_ROLLBACK_LOG WHERE IdBitacora = @IdB ORDER BY Id DESC`);
-        const logs = logsRes.recordset;
+        const logsRes = await reqLogs.query(`
+            SELECT 
+                SUM(CASE WHEN Accion = 'INSERT' THEN 1 ELSE 0 END) as deletedCount,
+                SUM(CASE WHEN Accion = 'UPDATE' THEN 1 ELSE 0 END) as revertedCount
+            FROM LIC_ROLLBACK_LOG WHERE IdBitacora = @IdB
+        `);
+        
+        const deleted = logsRes.recordset[0].deletedCount || 0;
+        const reverted = logsRes.recordset[0].revertedCount || 0;
 
-        if (logs.length === 0) {
+        if (deleted === 0 && reverted === 0) {
             await transaction.rollback();
             return res.status(404).json({ error: 'No hay logs de rollback para esta carga.' });
         }
 
-        let deleted = 0;
-        let reverted = 0;
+        if (deleted > 0) {
+            const reqDel1 = new sql.Request(transaction);
+            reqDel1.input('IdB', sql.Int, id);
+            await reqDel1.query(`
+                DELETE FROM LIC_PAGO_ACTUAL 
+                WHERE NumeroLicencia IN (SELECT NumeroLicencia FROM LIC_ROLLBACK_LOG WHERE IdBitacora = @IdB AND Accion = 'INSERT')
+            `);
 
-        for (const log of logs) {
-            if (log.Accion === 'INSERT') {
-                const reqDel1 = new sql.Request(transaction);
-                reqDel1.input('Num', sql.NVarChar, log.NumeroLicencia);
-                await reqDel1.query(`DELETE FROM LIC_PAGO_ACTUAL WHERE NumeroLicencia = @Num`);
+            const reqDel2 = new sql.Request(transaction);
+            reqDel2.input('IdB', sql.Int, id);
+            await reqDel2.query(`
+                DELETE FROM LIC_LICENCIA_ACTUAL 
+                WHERE NumeroLicencia IN (SELECT NumeroLicencia FROM LIC_ROLLBACK_LOG WHERE IdBitacora = @IdB AND Accion = 'INSERT')
+            `);
+        }
 
-                const reqDel2 = new sql.Request(transaction);
-                reqDel2.input('Num', sql.NVarChar, log.NumeroLicencia);
-                await reqDel2.query(`DELETE FROM LIC_LICENCIA_ACTUAL WHERE NumeroLicencia = @Num`);
-                
-                deleted++;
-            } else if (log.Accion === 'UPDATE') {
-                const reqUpd1 = new sql.Request(transaction);
-                reqUpd1.input('Hasta', sql.Date, log.ValorAnterior_Hasta);
-                reqUpd1.input('NumDias', sql.Int, log.ValorAnterior_NumDias);
-                reqUpd1.input('Num', sql.NVarChar, log.NumeroLicencia);
-                await reqUpd1.query(`
-                    UPDATE LIC_LICENCIA_ACTUAL 
-                    SET Hasta = @Hasta, NumDias = @NumDias 
-                    WHERE NumeroLicencia = @Num
-                `);
+        if (reverted > 0) {
+            const reqUpd1 = new sql.Request(transaction);
+            reqUpd1.input('IdB', sql.Int, id);
+            await reqUpd1.query(`
+                UPDATE L
+                SET L.Hasta = R.ValorAnterior_Hasta,
+                    L.NumDias = R.ValorAnterior_NumDias
+                FROM LIC_LICENCIA_ACTUAL L
+                INNER JOIN LIC_ROLLBACK_LOG R ON L.NumeroLicencia = R.NumeroLicencia
+                WHERE R.IdBitacora = @IdB AND R.Accion = 'UPDATE'
+            `);
 
-                const reqUpd2 = new sql.Request(transaction);
-                reqUpd2.input('NumDias', sql.Int, log.ValorAnterior_NumDias);
-                reqUpd2.input('Num', sql.NVarChar, log.NumeroLicencia);
-                await reqUpd2.query(`
-                    UPDATE LIC_PAGO_ACTUAL 
-                    SET NumDiasLicencia = @NumDias 
-                    WHERE NumeroLicencia = @Num
-                `);
-                
-                reverted++;
-            }
+            const reqUpd2 = new sql.Request(transaction);
+            reqUpd2.input('IdB', sql.Int, id);
+            await reqUpd2.query(`
+                UPDATE P
+                SET P.NumDiasLicencia = R.ValorAnterior_NumDias
+                FROM LIC_PAGO_ACTUAL P
+                INNER JOIN LIC_ROLLBACK_LOG R ON P.NumeroLicencia = R.NumeroLicencia
+                WHERE R.IdBitacora = @IdB AND R.Accion = 'UPDATE'
+            `);
         }
 
         // Marcar la bitácora como revertida modificando el nombre de archivo

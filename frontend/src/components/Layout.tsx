@@ -4,8 +4,9 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [menuLicenciasOpen, setMenuLicenciasOpen] = useState(true);
+  const [menuLicenciasOpen, setMenuLicenciasOpen] = useState(false);
   const [menuReposoOpen, setMenuReposoOpen] = useState(false);
+  const [menuPagoDirectoOpen, setMenuPagoDirectoOpen] = useState(false);
   const [userData, setUserData] = useState({ username: '', unidad: '' });
 
   useEffect(() => {
@@ -19,9 +20,12 @@ export default function Layout() {
         });
       } catch (e) {
         console.error("Error decoding token");
+        navigate('/login');
       }
+    } else {
+      navigate('/login');
     }
-  }, []);
+  }, [navigate]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -78,7 +82,7 @@ export default function Layout() {
                   menuLicenciasOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
                 }`}
               >
-                <span>Licencias Médicas</span>
+                <span>Licencias Médicas Convenio</span>
                 <span className="text-xs">{menuLicenciasOpen ? '▼' : '▶'}</span>
               </button>
               {menuLicenciasOpen && (
@@ -91,8 +95,46 @@ export default function Layout() {
                         ? 'bg-[#016098] text-white' 
                         : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
                       }`}
+                    >Estadistica Recupero</Link>
+                  </li>
+                  <li>
+                    <Link 
+                      to="/licencias/otras-estadisticas" 
+                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
+                        isActive('/licencias/otras-estadisticas') 
+                        ? 'bg-[#016098] text-white' 
+                        : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
+                      }`}
+                    >Otras Estadisticas</Link>
+                  </li>
+                </ul>
+              )}
+            </li>
+
+            
+            {/* Pago Directo */}
+            <li className="pt-2">
+              <button 
+                onClick={() => setMenuPagoDirectoOpen(!menuPagoDirectoOpen)}
+                className={`flex justify-between items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 ${
+                  menuPagoDirectoOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
+                }`}
+              >
+                <span>Licencias Medicas P. Dir.</span>
+                <span className="text-xs">{menuPagoDirectoOpen ? '▼' : '▶'}</span>
+              </button>
+              {menuPagoDirectoOpen && (
+                <ul className="mt-1 space-y-1 pl-4">
+                  <li>
+                    <Link 
+                      to="/pago-directo/estadisticas" 
+                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
+                        isActive('/pago-directo/estadisticas') 
+                        ? 'bg-[#016098] text-white' 
+                        : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
+                      }`}
                     >
-                      Estadísticas
+                      Estadisticas
                     </Link>
                   </li>
                 </ul>
@@ -120,9 +162,17 @@ export default function Layout() {
                         ? 'bg-[#016098] text-white' 
                         : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
                       }`}
-                    >
-                      Estadísticas
-                    </Link>
+                    >Estadistica Recupero</Link>
+                  </li>
+                  <li>
+                    <Link 
+                      to="/reposo/otras-estadisticas" 
+                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
+                        isActive('/reposo/otras-estadisticas') 
+                        ? 'bg-[#016098] text-white' 
+                        : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
+                      }`}
+                    >Otras Estadisticas</Link>
                   </li>
                   <li>
                     <Link 
@@ -133,7 +183,7 @@ export default function Layout() {
                         : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
                       }`}
                     >
-                      Procesar Órdenes de Reposo
+                      Procesar Archivos
                     </Link>
                   </li>
                   <li>
