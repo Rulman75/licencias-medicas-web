@@ -54,7 +54,7 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
   useEffect(() => {
     const fetchDominios = async () => {
       try {
-        const res = await axios.get('http://localhost:3001/api/dominios');
+        const res = await axios.get('/api/dominios');
         setDominios(res.data.data);
       } catch (err) {
         console.error('Error fetching dominios', err);
@@ -74,7 +74,7 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
       const params = new URLSearchParams();
       params.append('modulo', modulo);
       if (startYear) params.append('startYear', startYear);
-      const statsRes = await axios.get(`http://localhost:3001/api/dashboard/stats`, {
+      const statsRes = await axios.get(`/api/dashboard/stats`, {
         params: {
           year,
           startYear,
@@ -112,7 +112,7 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
     setLoadingDetalle(true);
     setViewingDetail(type);
     try {
-      const res = await axios.get(`http://localhost:3001/api/licencias/detalle`, {
+      const res = await axios.get(`/api/licencias/detalle`, {
         params: {
           type,
           year,
