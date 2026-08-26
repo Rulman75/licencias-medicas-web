@@ -156,6 +156,43 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
     XLSX.writeFile(workbook, fileName);
   };
 
+  
+  const exportChartToExcel = (data: any[], type: string) => {
+    let sheetData: any[] = [];
+    let filename = '';
+
+    if (type === 'composicion') {
+      sheetData = data.map((item: any) => ({
+        'Estado': item.name,
+        'Cantidad': item.value
+      }));
+      filename = 'Composicion_Por_Estado.xlsx';
+    } else if (type === 'sector') {
+      sheetData = data.map((item: any) => ({
+        'Sector': item.Label,
+        'Pagadas': item.Pagadas || 0,
+        'Impagas': item.Impagas || 0,
+        'Total': (item.Pagadas || 0) + (item.Impagas || 0)
+      }));
+      filename = 'Licencias_Por_Sector.xlsx';
+    } else if (type === 'entidad') {
+      sheetData = data.map((item: any) => ({
+        'Entidad de Salud': item.Label,
+        'Pagadas': item.Pagadas || 0,
+        'Impagas': item.Impagas || 0,
+        'Total': (item.Pagadas || 0) + (item.Impagas || 0)
+      }));
+      filename = 'Licencias_Por_Entidad.xlsx';
+    }
+
+    if (sheetData.length === 0) return;
+
+    const ws = XLSX.utils.json_to_sheet(sheetData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Datos Gráfico');
+    XLSX.writeFile(wb, filename);
+  };
+
   const pieDataCantidad = stats ? [
     { name: 'Pagadas', value: stats.pagadas.Cantidad, color: '#22c55e' },
     { name: 'Impagas', value: stats.noPagadas.Cantidad, color: '#ef4444' }
@@ -435,7 +472,12 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
               
               {/* Gráfico Torta: Composición */}
               <div className="bg-white rounded-xl shadow p-6 border border-[#e2e8f0]">
-                <h3 className="text-center font-bold text-[#016098] mb-4">COMPOSICIÓN POR ESTADO</h3>
+                <div className="flex justify-between items-center mb-4 px-2">
+                  <h3 className="font-bold text-[#016098] flex-1 text-center">COMPOSICIÓN POR ESTADO</h3>
+                  <button onClick={() => exportChartToExcel(pieDataCantidad, 'composicion')} className="text-green-600 hover:text-green-700 p-1 rounded hover:bg-green-50 transition" title="Exportar a Excel">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                  </button>
+                </div>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -463,7 +505,12 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
               {/* Gráfico Barras: Sector */}
               {modulo === 'licencias' && stats.porSector && (
                 <div className="bg-white rounded-xl shadow p-6 border border-[#e2e8f0]">
-                  <h3 className="text-center font-bold text-[#016098] mb-4">LICENCIAS POR SECTOR</h3>
+                  <div className="flex justify-between items-center mb-4 px-2">
+                    <h3 className="font-bold text-[#016098] flex-1 text-center">LICENCIAS POR SECTOR</h3>
+                    <button onClick={() => exportChartToExcel(stats.porSector, 'sector')} className="text-green-600 hover:text-green-700 p-1 rounded hover:bg-green-50 transition" title="Exportar a Excel">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    </button>
+                  </div>
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={stats.porSector}>
@@ -494,7 +541,12 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
               {/* Gráfico Barras: Entidad */}
               {modulo === 'licencias' && stats.porEntidad && (
                 <div className="bg-white rounded-xl shadow p-6 border border-[#e2e8f0]">
-                  <h3 className="text-center font-bold text-[#016098] mb-4">LICENCIAS POR ENTIDAD DE SALUD</h3>
+                  <div className="flex justify-between items-center mb-4 px-2">
+                    <h3 className="font-bold text-[#016098] flex-1 text-center">LICENCIAS POR ENTIDAD DE SALUD</h3>
+                    <button onClick={() => exportChartToExcel(stats.porEntidad, 'entidad')} className="text-green-600 hover:text-green-700 p-1 rounded hover:bg-green-50 transition" title="Exportar a Excel">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    </button>
+                  </div>
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={stats.porEntidad} margin={{ bottom: 20 }}>
