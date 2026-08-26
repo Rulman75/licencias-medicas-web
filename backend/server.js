@@ -88,7 +88,7 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
 
         const query = `
             SELECT 
-                SUM(CASE WHEN RTRIM(ISNULL(PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Convenio,
+                SUM(CASE WHEN RTRIM(ISNULL(PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP') THEN 1 ELSE 0 END) as Convenio,
                 SUM(CASE WHEN RTRIM(ISNULL(PagoDirecto, '')) = 'Pago Directo' THEN 1 ELSE 0 END) as PagoDirecto,
                 SUM(CASE WHEN RTRIM(ISNULL(PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo
             FROM LIC_LICENCIA_ACTUAL
@@ -115,7 +115,7 @@ app.get('/api/dashboard/stats', async (req, res) => {
         
         const reqDb = pool.request();
 
-        let condition = `NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')`;
+        let condition = `NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP')`;
         if (modulo === 'reposo') {
             condition = `IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')`;
         } else if (modulo === 'pago-directo') {
@@ -274,7 +274,7 @@ app.get('/api/dashboard/advanced-stats', async (req, res) => {
         
         const reqDb = pool.request();
 
-        let condition = "NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')";
+        let condition = "NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP')";
         if (modulo === 'reposo') {
             condition = "IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')";
         } else if (modulo === 'pago-directo') {
@@ -437,7 +437,7 @@ app.get('/api/licencias/detalle', async (req, res) => {
         const pool = await getConnection();
         const { year, startYear, type, sector, codUnidad, codSalud, vigencia, modulo, mutualidad, tipoSiniestro, tipoAlta } = req.query; // type: 'universo', 'pagadas', 'impagas'
 
-        let condition = `NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')`;
+        let condition = `NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP')`;
         if (modulo === 'reposo') {
             condition = `IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra')`;
         } else if (modulo === 'pago-directo') {
