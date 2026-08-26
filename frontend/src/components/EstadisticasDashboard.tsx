@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
+import * as htmlToImage from 'html-to-image';
 import OtrasEstadisticas from './OtrasEstadisticas';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from 'recharts';
 
@@ -46,6 +47,10 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
   const [vigencia, setVigencia] = useState('');
   const [tipoSiniestro, setTipoSiniestro] = useState('');
   const [tipoAlta, setTipoAlta] = useState('');
+
+  const chartComposicionRef = useRef<HTMLDivElement>(null);
+  const chartSectorRef = useRef<HTMLDivElement>(null);
+  const chartEntidadRef = useRef<HTMLDivElement>(null);
 
   const [dominios, setDominios] = useState<{salud: any[], unidades: any[]}>({ salud: [], unidades: [] });
   const [viewingDetail, setViewingDetail] = useState<'universo' | 'pagadas' | 'impagas' | null>(null);
@@ -195,9 +200,38 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
     if (sheetData.length === 0) return;
 
     const ws = XLSX.utils.json_to_sheet(sheetData);
+    
+    if (type === 'composicion') {
+      ws['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 20 }];
+    } else {
+      ws['!cols'] = [
+        { wch: 40 }, 
+        { wch: 18 }, 
+        { wch: 22 }, 
+        { wch: 18 }, 
+        { wch: 22 }, 
+        { wch: 18 }, 
+        { wch: 22 }
+      ];
+    }
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Datos Gráfico');
     XLSX.writeFile(wb, filename);
+  };
+
+  const handleDownloadChart = async (ref: React.RefObject<HTMLDivElement | null>, name: string) => {
+    if (!ref.current) return;
+    try {
+      const dataUrl = await htmlToImage.toPng(ref.current, { backgroundColor: '#ffffff' });
+      const link = document.createElement('a');
+      link.download = `${name}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error('Error al exportar gráfico:', err);
+      alert('Hubo un error al generar la imagen del gráfico.');
+    }
   };
 
   const pieDataCantidad = stats ? [
@@ -478,12 +512,17 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
             <div className={`grid grid-cols-1 ${modulo === 'licencias' && stats.porSector ? 'md:grid-cols-3' : 'md:grid-cols-1'} gap-6 mb-8`}>
               
               {/* Gráfico Torta: Composición */}
-              <div className="bg-white rounded-xl shadow p-6 border border-[#e2e8f0]">
+              <div ref={chartComposicionRef} className="bg-white rounded-xl shadow p-6 border border-[#e2e8f0]">
                 <div className="flex justify-between items-center mb-4 px-2">
                   <h3 className="font-bold text-[#016098] flex-1 text-center">COMPOSICIÓN POR ESTADO</h3>
-                  <button onClick={() => exportChartToExcel(pieDataCantidad, 'composicion')} className="text-green-600 hover:text-green-700 p-1 rounded hover:bg-green-50 transition" title="Exportar a Excel">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={() => handleDownloadChart(chartComposicionRef, 'Composicion_Estado')} className="text-[#016098] hover:text-blue-700 p-1 rounded hover:bg-blue-50 transition" title="Descargar Imagen (PNG)">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    </button>
+                    <button onClick={() => exportChartToExcel(pieDataCantidad, 'composicion')} className="text-green-600 hover:text-green-700 p-1 rounded hover:bg-green-50 transition" title="Exportar a Excel">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    </button>
+                  </div>
                 </div>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
@@ -511,12 +550,17 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
 
               {/* Gráfico Barras: Sector */}
               {modulo === 'licencias' && stats.porSector && (
-                <div className="bg-white rounded-xl shadow p-6 border border-[#e2e8f0]">
+                <div ref={chartSectorRef} className="bg-white rounded-xl shadow p-6 border border-[#e2e8f0]">
                   <div className="flex justify-between items-center mb-4 px-2">
                     <h3 className="font-bold text-[#016098] flex-1 text-center">LICENCIAS POR SECTOR</h3>
-                    <button onClick={() => exportChartToExcel(stats.porSector, 'sector')} className="text-green-600 hover:text-green-700 p-1 rounded hover:bg-green-50 transition" title="Exportar a Excel">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                    </button>
+                    <div className="flex gap-2">
+                      <button onClick={() => handleDownloadChart(chartSectorRef, 'Licencias_Sector')} className="text-[#016098] hover:text-blue-700 p-1 rounded hover:bg-blue-50 transition" title="Descargar Imagen (PNG)">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                      </button>
+                      <button onClick={() => exportChartToExcel(stats.porSector, 'sector')} className="text-green-600 hover:text-green-700 p-1 rounded hover:bg-green-50 transition" title="Exportar a Excel">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                      </button>
+                    </div>
                   </div>
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
@@ -547,12 +591,17 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
 
               {/* Gráfico Barras: Entidad */}
               {modulo === 'licencias' && stats.porEntidad && (
-                <div className="bg-white rounded-xl shadow p-6 border border-[#e2e8f0]">
+                <div ref={chartEntidadRef} className="bg-white rounded-xl shadow p-6 border border-[#e2e8f0]">
                   <div className="flex justify-between items-center mb-4 px-2">
                     <h3 className="font-bold text-[#016098] flex-1 text-center">LICENCIAS POR ENTIDAD DE SALUD</h3>
-                    <button onClick={() => exportChartToExcel(stats.porEntidad, 'entidad')} className="text-green-600 hover:text-green-700 p-1 rounded hover:bg-green-50 transition" title="Exportar a Excel">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                    </button>
+                    <div className="flex gap-2">
+                      <button onClick={() => handleDownloadChart(chartEntidadRef, 'Licencias_Entidad')} className="text-[#016098] hover:text-blue-700 p-1 rounded hover:bg-blue-50 transition" title="Descargar Imagen (PNG)">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                      </button>
+                      <button onClick={() => exportChartToExcel(stats.porEntidad, 'entidad')} className="text-green-600 hover:text-green-700 p-1 rounded hover:bg-green-50 transition" title="Exportar a Excel">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                      </button>
+                    </div>
                   </div>
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
