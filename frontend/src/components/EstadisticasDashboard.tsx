@@ -164,23 +164,30 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
     if (type === 'composicion') {
       sheetData = data.map((item: any) => ({
         'Estado': item.name,
-        'Cantidad': item.value
+        'Cantidad': item.value,
+        'Monto ($)': item.monto || 0
       }));
       filename = 'Composicion_Por_Estado.xlsx';
     } else if (type === 'sector') {
       sheetData = data.map((item: any) => ({
         'Sector': item.Label,
-        'Pagadas': item.Pagadas || 0,
-        'Impagas': item.Impagas || 0,
-        'Total': (item.Pagadas || 0) + (item.Impagas || 0)
+        'Cantidad Pagadas': item.PagadasCantidad || 0,
+        'Monto Pagadas ($)': item.PagadasMonto || 0,
+        'Cantidad Impagas': item.ImpagasCantidad || 0,
+        'Monto Impagas ($)': item.ImpagasMonto || 0,
+        'Cantidad Total': (item.PagadasCantidad || 0) + (item.ImpagasCantidad || 0),
+        'Monto Total ($)': (item.PagadasMonto || 0) + (item.ImpagasMonto || 0)
       }));
       filename = 'Licencias_Por_Sector.xlsx';
     } else if (type === 'entidad') {
       sheetData = data.map((item: any) => ({
         'Entidad de Salud': item.Label,
-        'Pagadas': item.Pagadas || 0,
-        'Impagas': item.Impagas || 0,
-        'Total': (item.Pagadas || 0) + (item.Impagas || 0)
+        'Cantidad Pagadas': item.PagadasCantidad || 0,
+        'Monto Pagadas ($)': item.PagadasMonto || 0,
+        'Cantidad Impagas': item.ImpagasCantidad || 0,
+        'Monto Impagas ($)': item.ImpagasMonto || 0,
+        'Cantidad Total': (item.PagadasCantidad || 0) + (item.ImpagasCantidad || 0),
+        'Monto Total ($)': (item.PagadasMonto || 0) + (item.ImpagasMonto || 0)
       }));
       filename = 'Licencias_Por_Entidad.xlsx';
     }
@@ -194,9 +201,9 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
   };
 
   const pieDataCantidad = stats ? [
-    { name: 'Pagadas', value: stats.pagadas.Cantidad, color: '#22c55e' },
-    { name: 'Impagas', value: stats.noPagadas.Cantidad, color: '#ef4444' }
-  ] : [];
+    { name: 'Pagadas', value: stats.pagadas.Cantidad, monto: stats.pagadas.TotalMonto, color: '#22c55e' },
+    { name: 'Impagas', value: stats.noPagadas.Cantidad, monto: stats.noPagadas.TotalMonto, color: '#ef4444' }
+  ] : [];;
 
   const getDetailTitle = () => {
     if (viewingDetail === 'universo') return 'Universo Total de Licencias';
