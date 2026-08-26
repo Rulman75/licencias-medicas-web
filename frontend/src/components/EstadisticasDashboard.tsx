@@ -171,23 +171,23 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
     } else if (type === 'sector') {
       sheetData = data.map((item: any) => ({
         'Sector': item.Label,
+        'Cantidad Total': (item.PagadasCantidad || 0) + (item.ImpagasCantidad || 0),
+        'Monto Total ($)': (item.PagadasMonto || 0) + (item.ImpagasMonto || 0),
         'Cantidad Pagadas': item.PagadasCantidad || 0,
         'Monto Pagadas ($)': item.PagadasMonto || 0,
         'Cantidad Impagas': item.ImpagasCantidad || 0,
-        'Monto Impagas ($)': item.ImpagasMonto || 0,
-        'Cantidad Total': (item.PagadasCantidad || 0) + (item.ImpagasCantidad || 0),
-        'Monto Total ($)': (item.PagadasMonto || 0) + (item.ImpagasMonto || 0)
+        'Monto Impagas ($)': item.ImpagasMonto || 0
       }));
       filename = 'Licencias_Por_Sector.xlsx';
     } else if (type === 'entidad') {
       sheetData = data.map((item: any) => ({
         'Entidad de Salud': item.Label,
+        'Cantidad Total': (item.PagadasCantidad || 0) + (item.ImpagasCantidad || 0),
+        'Monto Total ($)': (item.PagadasMonto || 0) + (item.ImpagasMonto || 0),
         'Cantidad Pagadas': item.PagadasCantidad || 0,
         'Monto Pagadas ($)': item.PagadasMonto || 0,
         'Cantidad Impagas': item.ImpagasCantidad || 0,
-        'Monto Impagas ($)': item.ImpagasMonto || 0,
-        'Cantidad Total': (item.PagadasCantidad || 0) + (item.ImpagasCantidad || 0),
-        'Monto Total ($)': (item.PagadasMonto || 0) + (item.ImpagasMonto || 0)
+        'Monto Impagas ($)': item.ImpagasMonto || 0
       }));
       filename = 'Licencias_Por_Entidad.xlsx';
     }
