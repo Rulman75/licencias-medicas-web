@@ -167,34 +167,63 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
     let filename = '';
 
     if (type === 'composicion') {
-      sheetData = data.map((item: any) => ({
-        'Estado': item.name,
-        'Cantidad': item.value,
-        'Monto ($)': item.monto || 0
-      }));
+      let totalCantidad = 0;
+      let totalMonto = 0;
+      sheetData = data.map((item: any) => {
+        totalCantidad += item.value || 0;
+        totalMonto += item.monto || 0;
+        return {
+          'Estado': item.name,
+          'Cantidad': item.value,
+          'Monto ($)': item.monto || 0
+        };
+      });
+      sheetData.push({
+        'Estado': 'TOTAL',
+        'Cantidad': totalCantidad,
+        'Monto ($)': totalMonto
+      });
       filename = 'Composicion_Por_Estado.xlsx';
-    } else if (type === 'sector') {
-      sheetData = data.map((item: any) => ({
-        'Sector': item.Label,
-        'Cantidad Total': (item.PagadasCantidad || 0) + (item.ImpagasCantidad || 0),
-        'Monto Total ($)': (item.PagadasMonto || 0) + (item.ImpagasMonto || 0),
-        'Cantidad Pagadas': item.PagadasCantidad || 0,
-        'Monto Pagadas ($)': item.PagadasMonto || 0,
-        'Cantidad Impagas': item.ImpagasCantidad || 0,
-        'Monto Impagas ($)': item.ImpagasMonto || 0
-      }));
-      filename = 'Licencias_Por_Sector.xlsx';
-    } else if (type === 'entidad') {
-      sheetData = data.map((item: any) => ({
-        'Entidad de Salud': item.Label,
-        'Cantidad Total': (item.PagadasCantidad || 0) + (item.ImpagasCantidad || 0),
-        'Monto Total ($)': (item.PagadasMonto || 0) + (item.ImpagasMonto || 0),
-        'Cantidad Pagadas': item.PagadasCantidad || 0,
-        'Monto Pagadas ($)': item.PagadasMonto || 0,
-        'Cantidad Impagas': item.ImpagasCantidad || 0,
-        'Monto Impagas ($)': item.ImpagasMonto || 0
-      }));
-      filename = 'Licencias_Por_Entidad.xlsx';
+    } else if (type === 'sector' || type === 'entidad') {
+      let totalCantTotal = 0, totalMontoTotal = 0;
+      let totalCantPagadas = 0, totalMontoPagadas = 0;
+      let totalCantImpagas = 0, totalMontoImpagas = 0;
+      
+      const labelKey = type === 'sector' ? 'Sector' : 'Entidad de Salud';
+
+      sheetData = data.map((item: any) => {
+        const cTotal = (item.PagadasCantidad || 0) + (item.ImpagasCantidad || 0);
+        const mTotal = (item.PagadasMonto || 0) + (item.ImpagasMonto || 0);
+        
+        totalCantTotal += cTotal;
+        totalMontoTotal += mTotal;
+        totalCantPagadas += (item.PagadasCantidad || 0);
+        totalMontoPagadas += (item.PagadasMonto || 0);
+        totalCantImpagas += (item.ImpagasCantidad || 0);
+        totalMontoImpagas += (item.ImpagasMonto || 0);
+
+        return {
+          [labelKey]: item.Label,
+          'Cantidad Total': cTotal,
+          'Monto Total ($)': mTotal,
+          'Cantidad Pagadas': item.PagadasCantidad || 0,
+          'Monto Pagadas ($)': item.PagadasMonto || 0,
+          'Cantidad Impagas': item.ImpagasCantidad || 0,
+          'Monto Impagas ($)': item.ImpagasMonto || 0
+        };
+      });
+
+      sheetData.push({
+        [labelKey]: 'TOTAL',
+        'Cantidad Total': totalCantTotal,
+        'Monto Total ($)': totalMontoTotal,
+        'Cantidad Pagadas': totalCantPagadas,
+        'Monto Pagadas ($)': totalMontoPagadas,
+        'Cantidad Impagas': totalCantImpagas,
+        'Monto Impagas ($)': totalMontoImpagas
+      });
+      
+      filename = type === 'sector' ? 'Licencias_Por_Sector.xlsx' : 'Licencias_Por_Entidad.xlsx';
     }
 
     if (sheetData.length === 0) return;
