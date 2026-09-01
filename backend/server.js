@@ -584,7 +584,7 @@ app.get('/api/info-gestion/funcionarios', async (req, res) => {
                 P.MATERNO as Apellido_Materno, 
                 P.NOMBRE as Nombre, 
                 P.NOMBRE_SUCURSAL, 
-                P.[NOMBRE UNIDAD], 
+                P.[NOMBRE UNIDAD] as NOMBRE_UNIDAD, 
                 SUM(L.NumDias) as Total_Dias
             FROM dbo.Personal P
             INNER JOIN dbo.LIC_LICENCIA_ACTUAL L ON L.RutFuncionario = P.[RUT EMPLEADO]
@@ -615,7 +615,7 @@ app.get('/api/info-gestion/funcionarios/detalle', async (req, res) => {
         let hasta = fechaHasta || '2026-08-31';
 
         const reqDb = pool.request();
-        reqDb.input('Rut', sql.Int, parseInt(rut, 10));
+        reqDb.input('Rut', sql.VarChar, rut.toString());
         reqDb.input('Desde', sql.Date, desde);
         reqDb.input('Hasta', sql.Date, hasta);
 
