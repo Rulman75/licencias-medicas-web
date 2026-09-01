@@ -578,12 +578,12 @@ app.get('/api/info-gestion/funcionarios', async (req, res) => {
 
         let dynamicFilters = "";
         if (unidad) {
-            dynamicFilters += " AND P.[NOMBRE UNIDAD] LIKE @Unidad ";
-            reqDb.input('Unidad', sql.NVarChar, `%${unidad}%`);
+            dynamicFilters += " AND P.[NOMBRE UNIDAD] = @Unidad ";
+            reqDb.input('Unidad', sql.NVarChar, unidad);
         }
         if (sucursal) {
-            dynamicFilters += " AND P.NOMBRE_SUCURSAL LIKE @Sucursal ";
-            reqDb.input('Sucursal', sql.NVarChar, `%${sucursal}%`);
+            dynamicFilters += " AND P.NOMBRE_SUCURSAL = @Sucursal ";
+            reqDb.input('Sucursal', sql.NVarChar, sucursal);
         }
         if (rutFiltro) {
             dynamicFilters += " AND P.[RUT EMPLEADO] = @RutFiltro ";
@@ -618,6 +618,30 @@ app.get('/api/info-gestion/funcionarios', async (req, res) => {
     } catch (err) {
         console.error("Error en info-gestion/funcionarios:", err);
         res.status(500).json({ error: "Error al obtener info gestion", details: err.message });
+    }
+});
+
+
+app.get('/api/info-gestion/filtros', async (req, res) => {
+    try {
+        const pool = await getConnection();
+        
+        const reqDbUnidades = pool.request();
+        const unidades = await reqDbUnidades.query("SELECT DISTINCT [NOMBRE UNIDAD] as Unidad FROM dbo.Personal WHERE [NOMBRE UNIDAD] IS NOT NULL AND RTRIM([NOMBRE UNIDAD]) <> '' ORDER BY [NOMBRE UNIDAD]");
+        
+        const reqDbSucursales = pool.request();
+        const sucursales = await reqDbSucursales.query("SELECT DISTINCT NOMBRE_SUCURSAL as Sucursal FROM dbo.Personal WHERE NOMBRE_SUCURSAL IS NOT NULL AND RTRIM(NOMBRE_SUCURSAL) <> '' ORDER BY NOMBRE_SUCURSAL");
+
+        res.json({
+            status: 'ok',
+            data: {
+                unidades: unidades.recordset.map(r => r.Unidad),
+                sucursales: sucursales.recordset.map(r => r.Sucursal)
+            }
+        });
+    } catch (err) {
+        console.error("Error en info-gestion/filtros:", err);
+        res.status(500).json({ error: "Error al obtener filtros", details: err.message });
     }
 });
 

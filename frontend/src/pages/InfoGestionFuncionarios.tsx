@@ -31,12 +31,30 @@ export default function InfoGestionFuncionarios() {
   const [unidad, setUnidad] = useState('');
   const [sucursal, setSucursal] = useState('');
   
+  const [opcionesUnidad, setOpcionesUnidad] = useState<string[]>([]);
+  const [opcionesSucursal, setOpcionesSucursal] = useState<string[]>([]);
+
   const [data, setData] = useState<FuncionarioStat[]>([]);
   const [loading, setLoading] = useState(false);
   
   const [selectedRut, setSelectedRut] = useState<number | null>(null);
   const [detalles, setDetalles] = useState<LicenciaDetalle[]>([]);
   const [loadingDetalle, setLoadingDetalle] = useState(false);
+
+  React.useEffect(() => {
+    const fetchFiltros = async () => {
+      try {
+        const res = await axios.get('/api/info-gestion/filtros');
+        if (res.data && res.data.data) {
+          setOpcionesUnidad(res.data.data.unidades || []);
+          setOpcionesSucursal(res.data.data.sucursales || []);
+        }
+      } catch (err) {
+        console.error("Error al obtener filtros", err);
+      }
+    };
+    fetchFiltros();
+  }, []);
 
   const fetchSummary = async () => {
     try {
@@ -139,11 +157,17 @@ export default function InfoGestionFuncionarios() {
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">Unidad</label>
-          <input type="text" placeholder="Buscar unidad..." className="p-2 border rounded-md text-sm w-40" value={unidad} onChange={e => setUnidad(e.target.value)} />
+          <select className="p-2 border rounded-md text-sm w-48" value={unidad} onChange={e => setUnidad(e.target.value)}>
+            <option value="">Todas</option>
+            {opcionesUnidad.map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
+          </select>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1">Sector (Sucursal)</label>
-          <input type="text" placeholder="Buscar sector..." className="p-2 border rounded-md text-sm w-40" value={sucursal} onChange={e => setSucursal(e.target.value)} />
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Sector</label>
+          <select className="p-2 border rounded-md text-sm w-48" value={sucursal} onChange={e => setSucursal(e.target.value)}>
+            <option value="">Todos</option>
+            {opcionesSucursal.map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
+          </select>
         </div>
         <button 
           onClick={fetchSummary}
