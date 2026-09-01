@@ -565,7 +565,7 @@ app.get('/api/licencias/detalle', async (req, res) => {
 app.get('/api/info-gestion/funcionarios', async (req, res) => {
     try {
         const pool = await getConnection();
-        const { fechaDesde, fechaHasta, minDias } = req.query;
+        const { fechaDesde, fechaHasta, minDias, unidad, sucursal, rutFiltro } = req.query;
         
         let desde = fechaDesde || '2024-08-01';
         let hasta = fechaHasta || '2026-08-31';
@@ -575,6 +575,20 @@ app.get('/api/info-gestion/funcionarios', async (req, res) => {
         reqDb.input('Desde', sql.Date, desde);
         reqDb.input('Hasta', sql.Date, hasta);
         reqDb.input('MinDias', sql.Int, dias);
+
+        let dynamicFilters = "";
+        if (unidad) {
+            dynamicFilters += " AND P.[NOMBRE UNIDAD] LIKE @Unidad ";
+            reqDb.input('Unidad', sql.NVarChar, `%${unidad}%`);
+        }
+        if (sucursal) {
+            dynamicFilters += " AND P.NOMBRE_SUCURSAL LIKE @Sucursal ";
+            reqDb.input('Sucursal', sql.NVarChar, `%${sucursal}%`);
+        }
+        if (rutFiltro) {
+            dynamicFilters += " AND P.[RUT EMPLEADO] = @RutFiltro ";
+            reqDb.input('RutFiltro', sql.VarChar, rutFiltro);
+        }
 
         const query = `
             SELECT 
@@ -592,6 +606,7 @@ app.get('/api/info-gestion/funcionarios', async (req, res) => {
             WHERE L.Desde >= @Desde AND L.hasta <= @Hasta
             AND RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra','PPP')
             AND ISNULL(L.Tipo_enferm, '') <> 'Maternal'
+            ${dynamicFilters}
             GROUP BY 
                 P.[RUT EMPLEADO], P.DV, P.PATERNO, P.MATERNO, P.NOMBRE, P.NOMBRE_SUCURSAL, P.[NOMBRE UNIDAD]
             HAVING SUM(L.NumDias) >= @MinDias

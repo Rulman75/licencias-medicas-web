@@ -27,6 +27,9 @@ export default function InfoGestionFuncionarios() {
   const [fechaDesde, setFechaDesde] = useState('2024-08-01');
   const [fechaHasta, setFechaHasta] = useState('2026-08-31');
   const [minDias, setMinDias] = useState(180);
+  const [rutFiltro, setRutFiltro] = useState('');
+  const [unidad, setUnidad] = useState('');
+  const [sucursal, setSucursal] = useState('');
   
   const [data, setData] = useState<FuncionarioStat[]>([]);
   const [loading, setLoading] = useState(false);
@@ -40,7 +43,14 @@ export default function InfoGestionFuncionarios() {
       setLoading(true);
       setSelectedRut(null);
       const res = await axios.get('/api/info-gestion/funcionarios', {
-        params: { fechaDesde, fechaHasta, minDias }
+        params: { 
+          fechaDesde, 
+          fechaHasta, 
+          minDias,
+          ...(rutFiltro ? { rutFiltro } : {}),
+          ...(unidad ? { unidad } : {}),
+          ...(sucursal ? { sucursal } : {})
+        }
       });
       setData(res.data.data || []);
     } catch (err) {
@@ -73,7 +83,7 @@ export default function InfoGestionFuncionarios() {
       'RUT': `${item.Rut}-${item.Dv}`,
       'Nombres': item.Nombre,
       'Apellidos': `${item.Apellido_Paterno} ${item.Apellido_Materno}`,
-      'Sucursal': item.NOMBRE_SUCURSAL,
+      'Sector': item.NOMBRE_SUCURSAL,
       'Unidad': item.NOMBRE_UNIDAD,
       'Total Días Licencia': item.Total_Dias
     })));
@@ -120,8 +130,20 @@ export default function InfoGestionFuncionarios() {
           <input type="date" className="p-2 border rounded-md text-sm" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1">Cantidad Mínima de Días</label>
-          <input type="number" className="p-2 border rounded-md text-sm w-32" value={minDias} onChange={e => setMinDias(parseInt(e.target.value) || 0)} />
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Días Mínimos</label>
+          <input type="number" className="p-2 border rounded-md text-sm w-24" value={minDias} onChange={e => setMinDias(parseInt(e.target.value) || 0)} />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">RUT</label>
+          <input type="text" placeholder="Ej: 12345678" className="p-2 border rounded-md text-sm w-32" value={rutFiltro} onChange={e => setRutFiltro(e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Unidad</label>
+          <input type="text" placeholder="Buscar unidad..." className="p-2 border rounded-md text-sm w-40" value={unidad} onChange={e => setUnidad(e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1">Sector (Sucursal)</label>
+          <input type="text" placeholder="Buscar sector..." className="p-2 border rounded-md text-sm w-40" value={sucursal} onChange={e => setSucursal(e.target.value)} />
         </div>
         <button 
           onClick={fetchSummary}
@@ -152,7 +174,7 @@ export default function InfoGestionFuncionarios() {
                   <th className="px-4 py-3">RUT</th>
                   <th className="px-4 py-3">Nombre</th>
                   <th className="px-4 py-3">Apellidos</th>
-                  <th className="px-4 py-3">Sucursal</th>
+                  <th className="px-4 py-3">Sector</th>
                   <th className="px-4 py-3">Unidad</th>
                   <th className="px-4 py-3">Días</th>
                   <th className="px-4 py-3 text-center">Acción</th>
