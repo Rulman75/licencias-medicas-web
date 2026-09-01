@@ -627,7 +627,7 @@ app.get('/api/info-gestion/funcionarios/detalle', async (req, res) => {
                 L.NumDias, 
                 L.Tipo_enferm, 
                 L.PagoDirecto,
-                LPA.Total as TotalPagado
+                LPA.TotalPagado
             FROM dbo.LIC_LICENCIA_ACTUAL L
             INNER JOIN dbo.LIC_PAGO_ACTUAL LPA ON L.NumeroLicencia = LPA.NumeroLicencia
             WHERE L.RutFuncionario = @Rut

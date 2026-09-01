@@ -105,7 +105,7 @@ export default function InfoGestionFuncionarios() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-6 mx-auto w-full">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-[#016098]">Información de Gestión - Licencia Funcionarios</h1>
       </div>
@@ -140,8 +140,8 @@ export default function InfoGestionFuncionarios() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl shadow border border-[#e2e8f0] overflow-hidden">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="bg-white rounded-xl shadow border border-[#e2e8f0] overflow-hidden xl:col-span-2">
           <div className="p-4 bg-gray-50 border-b font-bold text-gray-700 flex justify-between">
             <span>Resultados ({data.length})</span>
           </div>
@@ -151,6 +151,9 @@ export default function InfoGestionFuncionarios() {
                 <tr>
                   <th className="px-4 py-3">RUT</th>
                   <th className="px-4 py-3">Nombre</th>
+                  <th className="px-4 py-3">Apellidos</th>
+                  <th className="px-4 py-3">Sucursal</th>
+                  <th className="px-4 py-3">Unidad</th>
                   <th className="px-4 py-3">Días</th>
                   <th className="px-4 py-3 text-center">Acción</th>
                 </tr>
@@ -159,7 +162,10 @@ export default function InfoGestionFuncionarios() {
                 {data.length > 0 ? data.map((item, idx) => (
                   <tr key={idx} className={`border-b hover:bg-gray-50 ${selectedRut === item.Rut ? 'bg-blue-50' : ''}`}>
                     <td className="px-4 py-3 whitespace-nowrap">{item.Rut}-{item.Dv}</td>
-                    <td className="px-4 py-3">{item.Nombre} {item.Apellido_Paterno}</td>
+                    <td className="px-4 py-3">{item.Nombre}</td>
+                    <td className="px-4 py-3">{item.Apellido_Paterno} {item.Apellido_Materno}</td>
+                    <td className="px-4 py-3 text-xs">{item.NOMBRE_SUCURSAL}</td>
+                    <td className="px-4 py-3 text-xs">{item.NOMBRE_UNIDAD}</td>
                     <td className="px-4 py-3 font-bold text-[#016098]">{item.Total_Dias}</td>
                     <td className="px-4 py-3 text-center">
                       <button 
@@ -172,7 +178,7 @@ export default function InfoGestionFuncionarios() {
                     </td>
                   </tr>
                 )) : (
-                  <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No hay resultados. Presiona Buscar.</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No hay resultados. Presiona Buscar.</td></tr>
                 )}
               </tbody>
             </table>
