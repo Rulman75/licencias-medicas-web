@@ -10,6 +10,7 @@ import OtrasLicencias from './pages/OtrasLicencias';
 import OtrasReposo from './pages/OtrasReposo';
 import CargaReposo from './pages/CargaReposo';
 import Bitacora from './pages/Bitacora';
+import InfoGestionFuncionarios from './pages/InfoGestionFuncionarios';
 
 function App() {
   return (
@@ -30,6 +31,7 @@ function App() {
           <Route path="reposo/carga" element={<CargaReposo />} />
 
           <Route path="reposo/auditoria" element={<Bitacora />} />
+          <Route path="info-gestion/funcionarios" element={<InfoGestionFuncionarios />} />
         </Route>
       </Routes>
     </Router>

@@ -560,6 +560,91 @@ app.get('/api/licencias/detalle', async (req, res) => {
     }
 });
 
+
+// Info Gestión - Funcionarios
+app.get('/api/info-gestion/funcionarios', async (req, res) => {
+    try {
+        const pool = await getConnection();
+        const { fechaDesde, fechaHasta, minDias } = req.query;
+        
+        let desde = fechaDesde || '2024-08-01';
+        let hasta = fechaHasta || '2026-08-31';
+        let dias = parseInt(minDias, 10) || 180;
+
+        const reqDb = pool.request();
+        reqDb.input('Desde', sql.Date, desde);
+        reqDb.input('Hasta', sql.Date, hasta);
+        reqDb.input('MinDias', sql.Int, dias);
+
+        const query = `
+            SELECT 
+                P.[RUT EMPLEADO] as Rut, 
+                P.DV as Dv, 
+                P.PATERNO as Apellido_Paterno, 
+                P.MATERNO as Apellido_Materno, 
+                P.NOMBRE as Nombre, 
+                P.NOMBRE_SUCURSAL, 
+                P.[NOMBRE UNIDAD], 
+                SUM(L.NumDias) as Total_Dias
+            FROM dbo.Personal P
+            INNER JOIN dbo.LIC_LICENCIA_ACTUAL L ON L.RutFuncionario = P.[RUT EMPLEADO]
+            INNER JOIN dbo.LIC_PAGO_ACTUAL LPA ON L.NumeroLicencia = LPA.NumeroLicencia
+            WHERE L.Desde >= @Desde AND L.hasta <= @Hasta
+            AND RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra','PPP')
+            AND ISNULL(L.Tipo_enferm, '') <> 'Maternal'
+            GROUP BY 
+                P.[RUT EMPLEADO], P.DV, P.PATERNO, P.MATERNO, P.NOMBRE, P.NOMBRE_SUCURSAL, P.[NOMBRE UNIDAD]
+            HAVING SUM(L.NumDias) >= @MinDias
+            ORDER BY P.[RUT EMPLEADO] DESC
+        `;
+
+        const result = await reqDb.query(query);
+        res.json({ status: 'ok', data: result.recordset });
+    } catch (err) {
+        console.error("Error en info-gestion/funcionarios:", err);
+        res.status(500).json({ error: "Error al obtener info gestion", details: err.message });
+    }
+});
+
+app.get('/api/info-gestion/funcionarios/detalle', async (req, res) => {
+    try {
+        const pool = await getConnection();
+        const { rut, fechaDesde, fechaHasta } = req.query;
+        
+        let desde = fechaDesde || '2024-08-01';
+        let hasta = fechaHasta || '2026-08-31';
+
+        const reqDb = pool.request();
+        reqDb.input('Rut', sql.Int, parseInt(rut, 10));
+        reqDb.input('Desde', sql.Date, desde);
+        reqDb.input('Hasta', sql.Date, hasta);
+
+        const query = `
+            SELECT 
+                L.NumeroLicencia, 
+                L.Desde, 
+                L.hasta as Hasta, 
+                L.NumDias, 
+                L.Tipo_enferm, 
+                L.PagoDirecto,
+                LPA.Total as TotalPagado
+            FROM dbo.LIC_LICENCIA_ACTUAL L
+            INNER JOIN dbo.LIC_PAGO_ACTUAL LPA ON L.NumeroLicencia = LPA.NumeroLicencia
+            WHERE L.RutFuncionario = @Rut
+            AND L.Desde >= @Desde AND L.hasta <= @Hasta
+            AND RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra','PPP')
+            AND ISNULL(L.Tipo_enferm, '') <> 'Maternal'
+            ORDER BY L.Desde DESC
+        `;
+
+        const result = await reqDb.query(query);
+        res.json({ status: 'ok', data: result.recordset });
+    } catch (err) {
+        console.error("Error en info-gestion/funcionarios/detalle:", err);
+        res.status(500).json({ error: "Error al obtener detalle", details: err.message });
+    }
+});
+
 // Catch-all para que React Router funcione con URLs directas
 app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api/')) {

@@ -7,6 +7,7 @@ export default function Layout() {
   const [menuLicenciasOpen, setMenuLicenciasOpen] = useState(false);
   const [menuReposoOpen, setMenuReposoOpen] = useState(false);
   const [menuPagoDirectoOpen, setMenuPagoDirectoOpen] = useState(false);
+  const [menuInfoGestionOpen, setMenuInfoGestionOpen] = useState(false);
   const [userData, setUserData] = useState({ username: '', unidad: '' });
 
   useEffect(() => {
