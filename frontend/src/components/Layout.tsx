@@ -202,6 +202,35 @@ export default function Layout() {
                 </ul>
               )}
             </li>
+
+            {/* Info Gestión */}
+            <li className="pt-2">
+              <button 
+                onClick={() => setMenuInfoGestionOpen(!menuInfoGestionOpen)}
+                className={`flex justify-between items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 ${
+                  menuInfoGestionOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
+                }`}
+              >
+                <span>Info. Gestión</span>
+                <span className="text-xs">{menuInfoGestionOpen ? '▼' : '▶'}</span>
+              </button>
+              {menuInfoGestionOpen && (
+                <ul className="mt-1 space-y-1 pl-4">
+                  <li>
+                    <Link 
+                      to="/info-gestion/funcionarios" 
+                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
+                        isActive('/info-gestion/funcionarios') 
+                        ? 'bg-[#016098] text-white' 
+                        : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
+                      }`}
+                    >
+                      Licencia Funcionarios
+                    </Link>
+                  </li>
+                </ul>
+              )}
+            </li>
           </ul>
         </nav>
         
