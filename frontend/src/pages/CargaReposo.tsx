@@ -124,7 +124,9 @@ export default function CargaReposo() {
 
   const formatDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return '-';
-    const parts = dateStr.split('-');
+    // Remove time if ISO string
+    const dateOnly = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+    const parts = dateOnly.split('-');
     if (parts.length === 3) {
       return `${parts[2]}-${parts[1]}-${parts[0]}`; // YYYY-MM-DD to DD-MM-YYYY
     }
@@ -133,7 +135,14 @@ export default function CargaReposo() {
 
   const exportToExcel = (data: PreviewItem[], fileName: string) => {
     import('xlsx').then(xlsx => {
-      const ws = xlsx.utils.json_to_sheet(data);
+      const formattedData = data.map(item => ({
+        ...item,
+        Desde: formatDate(item.Desde),
+        Hasta: formatDate(item.Hasta),
+        DbDesde: formatDate(item.DbDesde),
+        DbHasta: formatDate(item.DbHasta)
+      }));
+      const ws = xlsx.utils.json_to_sheet(formattedData);
       const wb = xlsx.utils.book_new();
       xlsx.utils.book_append_sheet(wb, ws, "Datos");
       xlsx.writeFile(wb, `Reposo_${fileName}.xlsx`);

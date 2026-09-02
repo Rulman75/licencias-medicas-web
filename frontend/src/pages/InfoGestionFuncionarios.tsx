@@ -111,12 +111,21 @@ export default function InfoGestionFuncionarios() {
     XLSX.writeFile(wb, 'Info_Gestion_Funcionarios.xlsx');
   };
 
+  const formatDate = (dateString: string) => {
+    if (!dateString) return '';
+    if (dateString.includes('T')) {
+      const [year, month, day] = dateString.split('T')[0].split('-');
+      return `${day}-${month}-${year}`;
+    }
+    return new Date(dateString).toLocaleDateString('es-CL');
+  };
+
   const exportDetalleToExcel = () => {
     if (detalles.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(detalles.map(item => ({
-      'N° Licencia': item.NumeroLicencia,
-      'Desde': new Date(item.Desde).toLocaleDateString('es-CL'),
-      'Hasta': new Date(item.Hasta).toLocaleDateString('es-CL'),
+      'Nº Licencia': item.NumeroLicencia,
+      'Desde': formatDate(item.Desde),
+      'Hasta': formatDate(item.Hasta),
       'Días': item.NumDias,
       'Tipo Enfermedad': item.Tipo_enferm,
       'Pago Directo': item.PagoDirecto,
@@ -263,8 +272,8 @@ export default function InfoGestionFuncionarios() {
                     <tr key={idx} className="border-b hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium text-gray-700">{det.NumeroLicencia}</td>
                       <td className="px-4 py-3 text-xs">
-                        <div>{new Date(det.Desde).toLocaleDateString('es-CL')}</div>
-                        <div className="text-gray-400">al {new Date(det.Hasta).toLocaleDateString('es-CL')}</div>
+                        <div>{formatDate(det.Desde)}</div>
+                        <div className="text-gray-400">al {formatDate(det.Hasta)}</div>
                       </td>
                       <td className="px-4 py-3 text-center font-bold text-gray-600">{det.NumDias}</td>
                       <td className="px-4 py-3 text-right text-green-700 font-medium">
