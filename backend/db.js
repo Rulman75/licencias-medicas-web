@@ -6,6 +6,8 @@ const config = {
     password: process.env.DB_PASSWORD,
     server: process.env.DB_SERVER,
     database: process.env.DB_NAME,
+    requestTimeout: 90000, // 90 seconds timeout for long queries like detalles
+    connectionTimeout: 30000,
     options: {
         encrypt: false, // For older SQL Server 2012, encrypt might need to be false unless configured otherwise
         trustServerCertificate: true // Useful for local/internal IPs
