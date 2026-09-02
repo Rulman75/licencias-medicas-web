@@ -228,6 +228,30 @@ export default function Layout() {
                       Licencia Funcionarios
                     </Link>
                   </li>
+                  <li>
+                    <Link 
+                      to="/info-gestion/rechazadas" 
+                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
+                        isActive('/info-gestion/rechazadas') 
+                        ? 'bg-[#016098] text-white' 
+                        : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
+                      }`}
+                    >
+                      Gestión Pago Rechazadas
+                    </Link>
+                  </li>
+                  <li>
+                    <Link 
+                      to="/info-gestion/sin-resolucion" 
+                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
+                        isActive('/info-gestion/sin-resolucion') 
+                        ? 'bg-[#016098] text-white' 
+                        : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
+                      }`}
+                    >
+                      Gestión Pago Sin Resolución
+                    </Link>
+                  </li>
                 </ul>
               )}
             </li>

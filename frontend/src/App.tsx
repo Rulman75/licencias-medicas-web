@@ -11,6 +11,7 @@ import OtrasReposo from './pages/OtrasReposo';
 import CargaReposo from './pages/CargaReposo';
 import Bitacora from './pages/Bitacora';
 import InfoGestionFuncionarios from './pages/InfoGestionFuncionarios';
+import InfoGestionPagoLicencias from './pages/InfoGestionPagoLicencias';
 
 function App() {
   return (
@@ -32,6 +33,8 @@ function App() {
 
           <Route path="reposo/auditoria" element={<Bitacora />} />
           <Route path="info-gestion/funcionarios" element={<InfoGestionFuncionarios />} />
+          <Route path="info-gestion/rechazadas" element={<InfoGestionPagoLicencias tipo="rechazadas" titulo="Gestión Pago Licencias Rechazadas" />} />
+          <Route path="info-gestion/sin-resolucion" element={<InfoGestionPagoLicencias tipo="sin-resolucion" titulo="Gestión Pago Sin Resolución" />} />
         </Route>
       </Routes>
     </Router>

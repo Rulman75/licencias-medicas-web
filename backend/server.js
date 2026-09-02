@@ -684,6 +684,101 @@ app.get('/api/info-gestion/funcionarios/detalle', async (req, res) => {
     }
 });
 
+
+// Info Gestin - Pago Licencias (Rechazadas y Sin Resolucin)
+app.get('/api/info-gestion/pago-licencias', async (req, res) => {
+    try {
+        const pool = await getConnection();
+        const { tipo, fechaDesde, fechaHasta, rutFiltro } = req.query;
+        
+        let desde = fechaDesde || '2024-01-01';
+        let hasta = fechaHasta || '2026-12-31';
+
+        const reqDb = pool.request();
+        reqDb.input('Desde', sql.Date, desde);
+        reqDb.input('Hasta', sql.Date, hasta);
+
+        let tipoCondition = "";
+        if (tipo === 'rechazadas') {
+            tipoCondition = " AND L.Rechazo = 1 ";
+        } else if (tipo === 'sin-resolucion') {
+            tipoCondition = " AND L.Rechazo = 0 AND RTRIM(ISNULL(L.Autorizada, '')) = 'False' ";
+        } else {
+            return res.status(400).json({ error: "Tipo invalido" });
+        }
+
+        let rutCondition = "";
+        if (rutFiltro) {
+            rutCondition = " AND P.[RUT EMPLEADO] = @RutFiltro ";
+            reqDb.input('RutFiltro', sql.VarChar, rutFiltro);
+        }
+
+        const query = `
+            SELECT 
+                P.[RUT EMPLEADO] AS Rut, 
+                P.DV AS Dv, 
+                P.PATERNO AS Apellido_Paterno, 
+                P.MATERNO AS Apellido_Materno, 
+                P.NOMBRE AS Nombre, 
+                P.NOMBRE_SUCURSAL AS Sector, 
+                P.[NOMBRE UNIDAD] AS Unidad,
+                L.NumeroLicencia, 
+                L.Desde, 
+                L.Hasta, 
+                L.NumDias,
+                ISNULL(L.PagoEstimado, 0) AS PagoEstimado,
+                ISNULL(Detalle.TotalMonto, ISNULL(L.MontoDesc, 0)) AS PagoRecuperado,
+                (ISNULL(L.PagoEstimado, 0) - ISNULL(Detalle.TotalMonto, ISNULL(L.MontoDesc, 0))) AS PagoPorRecuperar,
+                (ISNULL(CAST(REPLACE(P.[TOT HABERES], ',', '.') AS FLOAT), 0) - ISNULL(CAST(REPLACE(P.[TOT DESCTOS], ',', '.') AS FLOAT), 0)) AS Liquidez,
+                Detalle.NumPagos
+            FROM dbo.LIC_LICENCIA_ACTUAL L
+            INNER JOIN dbo.Personal P ON L.RutFuncionario = P.[RUT EMPLEADO]
+            LEFT JOIN (
+                SELECT NumeroLicencia, SUM(Monto) as TotalMonto, COUNT(*) as NumPagos
+                FROM dbo.LIC_DETALLE_PAGO_ACTUAL
+                GROUP BY NumeroLicencia
+            ) Detalle ON L.NumeroLicencia = Detalle.NumeroLicencia
+            WHERE L.Desde >= @Desde AND L.Hasta <= @Hasta
+            AND RTRIM(P.VIGENCIA) = 'S'
+            ${tipoCondition}
+            ${rutCondition}
+            ORDER BY L.Desde DESC
+        `;
+
+        const result = await reqDb.query(query);
+        res.json({ status: 'ok', data: result.recordset });
+    } catch (err) {
+        console.error("Error en info-gestion/pago-licencias:", err);
+        res.status(500).json({ error: "Error al obtener informacion", details: err.message });
+    }
+});
+
+// Info Gestin - Pago Licencias Detalle
+app.get('/api/info-gestion/pago-licencias/detalle', async (req, res) => {
+    try {
+        const pool = await getConnection();
+        const { numeroLicencia } = req.query;
+        
+        if (!numeroLicencia) return res.status(400).json({ error: 'numeroLicencia requerido' });
+
+        const reqDb = pool.request();
+        reqDb.input('NumeroLicencia', sql.NVarChar, numeroLicencia);
+
+        const query = `
+            SELECT * 
+            FROM dbo.LIC_DETALLE_PAGO_ACTUAL
+            WHERE NumeroLicencia = @NumeroLicencia
+            ORDER BY Fecha_Liquidacion DESC
+        `;
+
+        const result = await reqDb.query(query);
+        res.json({ status: 'ok', data: result.recordset });
+    } catch (err) {
+        console.error("Error en info-gestion/pago-licencias/detalle:", err);
+        res.status(500).json({ error: "Error al obtener detalle de pagos", details: err.message });
+    }
+});
+
 // Catch-all para que React Router funcione con URLs directas
 app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api/')) {
