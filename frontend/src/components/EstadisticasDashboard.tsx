@@ -153,7 +153,19 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
   const handleExportExcel = () => {
     if (detalle.length === 0 || !viewingDetail) return;
 
-    const worksheet = XLSX.utils.json_to_sheet(detalle);
+    const formattedDetalle = detalle.map(row => {
+      const newRow = { ...row };
+      Object.keys(newRow).forEach(key => {
+        const val = newRow[key];
+        if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}T/)) {
+          const [year, month, day] = val.split('T')[0].split('-');
+          newRow[key] = `${day}-${month}-${year}`;
+        }
+      });
+      return newRow;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(formattedDetalle);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, `Licencias_${viewingDetail}`);
 
@@ -728,7 +740,8 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
                             } else if (val === null || val === undefined) {
                               val = '-';
                             } else if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}T/)) {
-                              val = new Date(val).toLocaleDateString('es-CL');
+                              const [year, month, day] = val.split('T')[0].split('-');
+                              val = `${day}-${month}-${year}`;
                             }
                             return (
                               <td key={col} className="p-3 border-b border-gray-100 text-gray-800">
