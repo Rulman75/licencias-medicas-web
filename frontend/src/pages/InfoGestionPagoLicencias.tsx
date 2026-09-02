@@ -24,8 +24,8 @@ interface FuncionarioPagoStat {
 interface DetallePago {
   NumeroLicencia: string;
   Monto: number;
-  Fecha_Liquidacion: string;
-  Num_Resolucion: string;
+  FechaDepCtaCte: string;
+  NumeroDocumento: string;
 }
 
 interface Props {
@@ -124,8 +124,8 @@ export default function InfoGestionPagoLicencias({ tipo, titulo }: Props) {
     const ws = XLSX.utils.json_to_sheet(detallesPago.map(item => ({
       'Nº Licencia': item.NumeroLicencia,
       'Monto Recuperado': item.Monto,
-      'Fecha Liquidación': formatDate(item.Fecha_Liquidacion),
-      'Nº Resolución': item.Num_Resolucion
+      'Fecha Liquidación': formatDate(item.FechaDepCtaCte),
+      'Nº Resolución / Doc': item.NumeroDocumento
     })));
     const wb = XLSX.utils.book_new();
     ws['!cols'] = [{ wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 15 }];
@@ -254,8 +254,8 @@ export default function InfoGestionPagoLicencias({ tipo, titulo }: Props) {
                 <tbody>
                   {detallesPago.length > 0 ? detallesPago.map((det, idx) => (
                     <tr key={idx} className="border-b hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-600">{formatDate(det.Fecha_Liquidacion)}</td>
-                      <td className="px-4 py-3 text-xs text-gray-500">{det.Num_Resolucion}</td>
+                      <td className="px-4 py-3 font-medium text-gray-600">{formatDate(det.FechaDepCtaCte)}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{det.NumeroDocumento}</td>
                       <td className="px-4 py-3 text-right font-bold text-green-700">
                         {formatCurrency(det.Monto)}
                       </td>

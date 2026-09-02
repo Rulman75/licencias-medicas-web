@@ -768,7 +768,7 @@ app.get('/api/info-gestion/pago-licencias/detalle', async (req, res) => {
             SELECT * 
             FROM dbo.LIC_DETALLE_PAGO_ACTUAL
             WHERE NumeroLicencia = @NumeroLicencia
-            ORDER BY Fecha_Liquidacion DESC
+            ORDER BY FechaDepCtaCte DESC
         `;
 
         const result = await reqDb.query(query);
