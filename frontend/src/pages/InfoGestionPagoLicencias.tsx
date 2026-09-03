@@ -14,6 +14,8 @@ interface FuncionarioPagoStat {
   Desde: string;
   Hasta: string;
   NumDias: number;
+  Obser_apelacion: string | null;
+  MontoDesc: number;
   PagoEstimado: number;
   PagoRecuperado: number;
   PagoPorRecuperar: number;
@@ -26,6 +28,8 @@ interface DetallePago {
   Monto: number;
   FechaDepCtaCte: string;
   NumeroDocumento: string;
+  DiasPagados: number;
+  concepto: string;
 }
 
 interface Props {
@@ -104,7 +108,8 @@ export default function InfoGestionPagoLicencias({ tipo, titulo }: Props) {
       'Desde': formatDate(item.Desde),
       'Hasta': formatDate(item.Hasta),
       'Días': item.NumDias,
-      'Pago Estimado': item.PagoEstimado,
+      'Obs. Apelación': item.Obser_apelacion || '',
+      'ESTIMADO / MTO. DESC.': `${formatCurrency(item.PagoEstimado)} / ${formatCurrency(item.MontoDesc)}`,
       'Pago Recuperado': item.PagoRecuperado,
       'Pago Por Recuperar': item.PagoPorRecuperar,
       'Liquidez': item.Liquidez
@@ -122,13 +127,14 @@ export default function InfoGestionPagoLicencias({ tipo, titulo }: Props) {
   const exportDetalleToExcel = () => {
     if (detallesPago.length === 0) return;
     const ws = XLSX.utils.json_to_sheet(detallesPago.map(item => ({
-      'Nº Licencia': item.NumeroLicencia,
+      'N° Documento': item.NumeroDocumento,
+      'Fecha Pago': formatDate(item.FechaDepCtaCte),
+      'Dias Pagados': item.DiasPagados,
       'Monto Recuperado': item.Monto,
-      'Fecha Liquidación': formatDate(item.FechaDepCtaCte),
-      'Nº Resolución / Doc': item.NumeroDocumento
+      'Concepto': item.concepto
     })));
     const wb = XLSX.utils.book_new();
-    ws['!cols'] = [{ wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 15 }];
+    ws['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 25 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Detalle Pagos');
     XLSX.writeFile(wb, `Detalle_Pagos_${selectedLicencia}.xlsx`);
   };
@@ -184,7 +190,8 @@ export default function InfoGestionPagoLicencias({ tipo, titulo }: Props) {
                   <th className="px-4 py-3">RUT</th>
                   <th className="px-4 py-3">Funcionario</th>
                   <th className="px-4 py-3">Nº Lic</th>
-                  <th className="px-4 py-3 text-right text-blue-600">Estimado</th>
+                  <th className="px-4 py-3">Obs. Apelación</th>
+                  <th className="px-4 py-3 text-right text-blue-600 whitespace-nowrap">ESTIMADO / MTO. DESC.</th>
                   <th className="px-4 py-3 text-right text-green-600">Recuperado</th>
                   <th className="px-4 py-3 text-right text-red-600">X Recuperar</th>
                   <th className="px-4 py-3 text-right">Liquidez</th>
@@ -200,7 +207,8 @@ export default function InfoGestionPagoLicencias({ tipo, titulo }: Props) {
                       <div className="text-gray-500">{item.Unidad}</div>
                     </td>
                     <td className="px-4 py-3 font-medium text-gray-700">{item.NumeroLicencia}</td>
-                    <td className="px-4 py-3 text-right font-medium text-blue-700">{formatCurrency(item.PagoEstimado)}</td>
+                    <td className="px-4 py-3 text-xs text-gray-600 truncate max-w-[150px]" title={item.Obser_apelacion || ''}>{item.Obser_apelacion}</td>
+                    <td className="px-4 py-3 text-right font-medium text-blue-700">{formatCurrency(item.PagoEstimado)} / <span className="text-gray-500">{formatCurrency(item.MontoDesc)}</span></td>
                     <td className="px-4 py-3 text-right font-medium text-green-700">{formatCurrency(item.PagoRecuperado)}</td>
                     <td className="px-4 py-3 text-right font-bold text-red-600">{formatCurrency(item.PagoPorRecuperar)}</td>
                     <td className="px-4 py-3 text-right font-medium">{formatCurrency(item.Liquidez)}</td>
@@ -217,7 +225,7 @@ export default function InfoGestionPagoLicencias({ tipo, titulo }: Props) {
                   </tr>
                 ))}
                 {data.length === 0 && !loading && (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No se encontraron registros.</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-500">No se encontraron registros.</td></tr>
                 )}
               </tbody>
             </table>
@@ -246,22 +254,26 @@ export default function InfoGestionPagoLicencias({ tipo, titulo }: Props) {
               <table className="w-full text-sm text-left">
                 <thead className="text-xs text-gray-500 uppercase bg-gray-50 sticky top-0">
                   <tr>
-                    <th className="px-4 py-3">Fecha Liq.</th>
-                    <th className="px-4 py-3">Resolución</th>
+                    <th className="px-4 py-3">N° Documento</th>
+                    <th className="px-4 py-3">Fecha Pago</th>
+                    <th className="px-4 py-3 text-center">Dias Pagados</th>
                     <th className="px-4 py-3 text-right">Monto Recuperado</th>
+                    <th className="px-4 py-3">Concepto</th>
                   </tr>
                 </thead>
                 <tbody>
                   {detallesPago.length > 0 ? detallesPago.map((det, idx) => (
                     <tr key={idx} className="border-b hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-600">{formatDate(det.FechaDepCtaCte)}</td>
                       <td className="px-4 py-3 text-xs text-gray-500">{det.NumeroDocumento}</td>
+                      <td className="px-4 py-3 font-medium text-gray-600">{formatDate(det.FechaDepCtaCte)}</td>
+                      <td className="px-4 py-3 text-center">{det.DiasPagados}</td>
                       <td className="px-4 py-3 text-right font-bold text-green-700">
                         {formatCurrency(det.Monto)}
                       </td>
+                      <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[150px]" title={det.concepto}>{det.concepto}</td>
                     </tr>
                   )) : (
-                    <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-500">No existen registros en la tabla de detalles para esta licencia. El monto recuperado proviene de la tabla principal (MontoDesc).</td></tr>
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No existen registros en la tabla de detalles para esta licencia. El monto recuperado proviene de la tabla principal (MontoDesc).</td></tr>
                   )}
                 </tbody>
               </table>
