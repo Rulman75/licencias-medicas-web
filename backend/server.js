@@ -700,7 +700,8 @@ app.get('/api/info-gestion/pago-licencias', async (req, res) => {
 
         let tipoCondition = "";
         if (tipo === 'rechazadas') {
-            tipoCondition = " AND L        } else if (tipo === 'sin-resolucion') {
+            tipoCondition = " AND L.Rechazo = 1 ";
+        } else if (tipo === 'sin-resolucion') {
             tipoCondition = " AND L.Rechazo = 0 AND RTRIM(ISNULL(L.Autorizada, '')) = 'False' AND L.Obser_apelacion IS NULL ";
         } else {
             return res.status(400).json({ error: "Tipo invalido" });
