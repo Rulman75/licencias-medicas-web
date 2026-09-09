@@ -11,21 +11,30 @@ interface FuncionarioStat {
   NOMBRE_SUCURSAL: string;
   NOMBRE_UNIDAD: string;
   Total_Dias: number;
+  Tiene_Vigente: number;
 }
 
 interface LicenciaDetalle {
+  Rut: string;
+  Nombre: string;
+  Apellidos: string;
+  Cenco: string;
+  Fecha_Recepcion: string;
   NumeroLicencia: string;
   Desde: string;
   Hasta: string;
-  NumDias: number;
-  Tipo_enferm: string;
-  PagoDirecto: string;
-  TotalPagado: number;
+  Observacion: string;
+  Vigencia: string;
 }
 
 export default function InfoGestionFuncionarios() {
-  const [fechaDesde, setFechaDesde] = useState('2024-08-01');
-  const [fechaHasta, setFechaHasta] = useState('2026-08-31');
+  const today = new Date();
+  const twoYearsAgo = new Date(today);
+  twoYearsAgo.setFullYear(today.getFullYear() - 2);
+  const formatDateForInput = (date: Date) => date.toISOString().split('T')[0];
+
+  const [fechaDesde, setFechaDesde] = useState(formatDateForInput(twoYearsAgo));
+  const [fechaHasta, setFechaHasta] = useState(formatDateForInput(today));
   const [minDias, setMinDias] = useState(180);
   const [rutFiltro, setRutFiltro] = useState('');
   const [unidad, setUnidad] = useState('');
@@ -103,10 +112,11 @@ export default function InfoGestionFuncionarios() {
       'Apellidos': `${item.Apellido_Paterno} ${item.Apellido_Materno}`,
       'Sector': item.NOMBRE_SUCURSAL,
       'Unidad': item.NOMBRE_UNIDAD,
-      'Total Días Licencia': item.Total_Dias
+      'Total Días Licencia': item.Total_Dias,
+      'Licencia Vigente': item.Tiene_Vigente ? 'SI' : 'NO'
     })));
     const wb = XLSX.utils.book_new();
-    ws['!cols'] = [{ wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 30 }, { wch: 30 }, { wch: 20 }];
+    ws['!cols'] = [{ wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 30 }, { wch: 30 }, { wch: 20 }, { wch: 15 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Funcionarios');
     XLSX.writeFile(wb, 'Info_Gestion_Funcionarios.xlsx');
   };
@@ -120,21 +130,50 @@ export default function InfoGestionFuncionarios() {
     return new Date(dateString).toLocaleDateString('es-CL');
   };
 
-  const exportDetalleToExcel = () => {
-    if (detalles.length === 0) return;
-    const ws = XLSX.utils.json_to_sheet(detalles.map(item => ({
+  const formatDetalleSheet = (detallesList: LicenciaDetalle[]) => {
+    return detallesList.map(item => ({
+      'RUT': item.Rut,
+      'Nombres': item.Nombre,
+      'Apellidos': item.Apellidos,
+      'Cenco': item.Cenco,
+      'Fecha Recepción': formatDate(item.Fecha_Recepcion),
       'Nº Licencia': item.NumeroLicencia,
       'Desde': formatDate(item.Desde),
       'Hasta': formatDate(item.Hasta),
-      'Días': item.NumDias,
-      'Tipo Enfermedad': item.Tipo_enferm,
-      'Pago Directo': item.PagoDirecto,
-      'Total Pagado ($)': item.TotalPagado
-    })));
+      'Observación': item.Observacion,
+      'Vigencia': item.Vigencia
+    }));
+  };
+
+  const exportDetalleToExcel = () => {
+    if (detalles.length === 0) return;
+    const ws = XLSX.utils.json_to_sheet(formatDetalleSheet(detalles));
     const wb = XLSX.utils.book_new();
-    ws['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 25 }, { wch: 15 }, { wch: 20 }];
+    ws['!cols'] = [{ wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 40 }, { wch: 15 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Detalle Licencias');
     XLSX.writeFile(wb, `Detalle_Licencias_${selectedRut}.xlsx`);
+  };
+
+  const exportDetalleGlobalToExcel = async () => {
+    if (data.length === 0) return;
+    try {
+      setLoading(true);
+      const res = await axios.get('/api/info-gestion/funcionarios/detalle-global', {
+        params: { fechaDesde, fechaHasta, minDias, unidad, sucursal, rutFiltro }
+      });
+      if (res.data && res.data.data) {
+        const ws = XLSX.utils.json_to_sheet(formatDetalleSheet(res.data.data));
+        const wb = XLSX.utils.book_new();
+        ws['!cols'] = [{ wch: 15 }, { wch: 25 }, { wch: 25 }, { wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 40 }, { wch: 15 }];
+        XLSX.utils.book_append_sheet(wb, ws, 'Detalle Global Licencias');
+        XLSX.writeFile(wb, `Detalle_Global_Licencias.xlsx`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error al exportar el detalle global.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const formatCurrency = (value: number) => {
@@ -197,8 +236,18 @@ export default function InfoGestionFuncionarios() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="bg-white rounded-xl shadow border border-[#e2e8f0] overflow-hidden xl:col-span-2">
-          <div className="p-4 bg-gray-50 border-b font-bold text-gray-700 flex justify-between">
+          <div className="p-4 bg-gray-50 border-b font-bold text-gray-700 flex justify-between items-center">
             <span>Resultados ({data.length})</span>
+            {data.length > 0 && (
+              <button 
+                onClick={exportDetalleGlobalToExcel}
+                disabled={loading}
+                className="text-sm bg-[#016098] hover:bg-[#014d7a] text-white px-3 py-1 rounded transition flex items-center gap-1 disabled:opacity-50"
+                title="Exportar todo el detalle de los resultados a Excel"
+              >
+                {loading ? 'Cargando...' : 'Ver Detalle Global'}
+              </button>
+            )}
           </div>
           <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
             <table className="w-full text-sm text-left">
@@ -210,6 +259,7 @@ export default function InfoGestionFuncionarios() {
                   <th className="px-4 py-3">Sector</th>
                   <th className="px-4 py-3">Unidad</th>
                   <th className="px-4 py-3">Días</th>
+                  <th className="px-4 py-3 text-center">Vigencia</th>
                   <th className="px-4 py-3 text-center">Acción</th>
                 </tr>
               </thead>
@@ -223,6 +273,13 @@ export default function InfoGestionFuncionarios() {
                     <td className="px-4 py-3 text-xs">{item.NOMBRE_UNIDAD}</td>
                     <td className="px-4 py-3 font-bold text-[#016098]">{item.Total_Dias}</td>
                     <td className="px-4 py-3 text-center">
+                      {item.Tiene_Vigente ? (
+                        <span className="bg-green-100 text-green-800 text-xs font-medium me-2 px-2.5 py-0.5 rounded border border-green-400">Licencia Vigente</span>
+                      ) : (
+                        <span className="text-gray-300">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
                       <button 
                         onClick={() => fetchDetalle(item.Rut)}
                         className="text-[#016098] hover:text-blue-800 bg-blue-100 hover:bg-blue-200 px-3 py-1 rounded transition"
@@ -233,7 +290,7 @@ export default function InfoGestionFuncionarios() {
                     </td>
                   </tr>
                 )) : (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No hay resultados. Presiona Buscar.</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No hay resultados. Presiona Buscar.</td></tr>
                 )}
               </tbody>
             </table>
@@ -261,27 +318,35 @@ export default function InfoGestionFuncionarios() {
               <table className="w-full text-sm text-left">
                 <thead className="text-xs text-gray-500 uppercase bg-gray-50 sticky top-0">
                   <tr>
-                    <th className="px-4 py-3">N° Licencia</th>
-                    <th className="px-4 py-3">Período</th>
-                    <th className="px-4 py-3 text-center">Días</th>
-                    <th className="px-4 py-3 text-right">Pagado</th>
+                    <th className="px-4 py-3">RUT</th>
+                    <th className="px-4 py-3">Funcionario</th>
+                    <th className="px-4 py-3">Cenco</th>
+                    <th className="px-4 py-3">Recepción</th>
+                    <th className="px-4 py-3">Nº Licencia</th>
+                    <th className="px-4 py-3">Desde</th>
+                    <th className="px-4 py-3">Hasta</th>
+                    <th className="px-4 py-3">Observación</th>
+                    <th className="px-4 py-3">Vigencia</th>
                   </tr>
                 </thead>
                 <tbody>
                   {detalles.length > 0 ? detalles.map((det, idx) => (
                     <tr key={idx} className="border-b hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-700">{det.NumeroLicencia}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{det.Rut}</td>
                       <td className="px-4 py-3 text-xs">
-                        <div>{formatDate(det.Desde)}</div>
-                        <div className="text-gray-400">al {formatDate(det.Hasta)}</div>
+                        <div className="font-bold">{det.Nombre}</div>
+                        <div>{det.Apellidos}</div>
                       </td>
-                      <td className="px-4 py-3 text-center font-bold text-gray-600">{det.NumDias}</td>
-                      <td className="px-4 py-3 text-right text-green-700 font-medium">
-                        {formatCurrency(det.TotalPagado || 0)}
-                      </td>
+                      <td className="px-4 py-3 text-xs">{det.Cenco}</td>
+                      <td className="px-4 py-3 text-xs">{formatDate(det.Fecha_Recepcion)}</td>
+                      <td className="px-4 py-3 font-medium text-gray-700">{det.NumeroLicencia}</td>
+                      <td className="px-4 py-3 text-xs">{formatDate(det.Desde)}</td>
+                      <td className="px-4 py-3 text-xs">{formatDate(det.Hasta)}</td>
+                      <td className="px-4 py-3 text-xs truncate max-w-[150px]" title={det.Observacion}>{det.Observacion}</td>
+                      <td className="px-4 py-3 text-xs">{det.Vigencia === 'S       ' ? 'SI' : det.Vigencia}</td>
                     </tr>
                   )) : (
-                    <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No se encontraron licencias.</td></tr>
+                    <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-500">No se encontraron licencias.</td></tr>
                   )}
                 </tbody>
               </table>

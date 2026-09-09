@@ -599,7 +599,8 @@ app.get('/api/info-gestion/funcionarios', async (req, res) => {
                 P.NOMBRE as Nombre, 
                 P.NOMBRE_SUCURSAL, 
                 P.[NOMBRE UNIDAD] as NOMBRE_UNIDAD, 
-                SUM(L.NumDias) as Total_Dias
+                SUM(L.NumDias) as Total_Dias,
+                MAX(CASE WHEN CAST(GETDATE() AS DATE) BETWEEN L.Desde AND L.Hasta THEN 1 ELSE 0 END) as Tiene_Vigente
             FROM dbo.Personal P
             INNER JOIN dbo.LIC_LICENCIA_ACTUAL L ON L.RutFuncionario = P.[RUT EMPLEADO]
             INNER JOIN dbo.LIC_PAGO_ACTUAL LPA ON L.NumeroLicencia = LPA.NumeroLicencia
@@ -660,14 +661,18 @@ app.get('/api/info-gestion/funcionarios/detalle', async (req, res) => {
 
         const query = `
             SELECT 
+                P.[RUT EMPLEADO] + '-' + P.DV AS Rut,
+                P.NOMBRE AS Nombre,
+                P.PATERNO + ' ' + P.MATERNO AS Apellidos,
+                P.NOMBRE_SUCURSAL AS Cenco,
+                L.Recepcion AS Fecha_Recepcion,
                 L.NumeroLicencia, 
                 L.Desde, 
-                L.hasta as Hasta, 
-                L.NumDias, 
-                L.Tipo_enferm, 
-                L.PagoDirecto,
-                LPA.TotalPagado
+                L.hasta as Hasta,
+                L.Observacion,
+                P.VIGENCIA AS Vigencia
             FROM dbo.LIC_LICENCIA_ACTUAL L
+            INNER JOIN dbo.Personal P ON L.RutFuncionario = P.[RUT EMPLEADO]
             INNER JOIN dbo.LIC_PAGO_ACTUAL LPA ON L.NumeroLicencia = LPA.NumeroLicencia
             WHERE L.RutFuncionario = @Rut
             AND L.Desde >= @Desde AND L.hasta <= @Hasta
@@ -681,6 +686,78 @@ app.get('/api/info-gestion/funcionarios/detalle', async (req, res) => {
     } catch (err) {
         console.error("Error en info-gestion/funcionarios/detalle:", err);
         res.status(500).json({ error: "Error al obtener detalle", details: err.message });
+    }
+});
+
+
+// Info Gestion - Detalle Global
+app.get('/api/info-gestion/funcionarios/detalle-global', async (req, res) => {
+    try {
+        const pool = await getConnection();
+        const { fechaDesde, fechaHasta, minDias, unidad, sucursal, rutFiltro } = req.query;
+        
+        let desde = fechaDesde || '2024-08-01';
+        let hasta = fechaHasta || '2026-08-31';
+        let dias = parseInt(minDias, 10) || 180;
+
+        const reqDb = pool.request();
+        reqDb.input('Desde', sql.Date, desde);
+        reqDb.input('Hasta', sql.Date, hasta);
+        reqDb.input('MinDias', sql.Int, dias);
+
+        let dynamicFilters = "";
+        if (unidad) {
+            dynamicFilters += " AND P.[NOMBRE UNIDAD] = @Unidad ";
+            reqDb.input('Unidad', sql.NVarChar, unidad);
+        }
+        if (sucursal) {
+            dynamicFilters += " AND P.NOMBRE_SUCURSAL = @Sucursal ";
+            reqDb.input('Sucursal', sql.NVarChar, sucursal);
+        }
+        if (rutFiltro) {
+            dynamicFilters += " AND P.[RUT EMPLEADO] = @RutFiltro ";
+            reqDb.input('RutFiltro', sql.VarChar, rutFiltro);
+        }
+
+        const query = `
+            WITH Filtrados AS (
+                SELECT P.[RUT EMPLEADO]
+                FROM dbo.Personal P
+                INNER JOIN dbo.LIC_LICENCIA_ACTUAL L ON L.RutFuncionario = P.[RUT EMPLEADO]
+                INNER JOIN dbo.LIC_PAGO_ACTUAL LPA ON L.NumeroLicencia = LPA.NumeroLicencia
+                WHERE L.Desde >= @Desde AND L.hasta <= @Hasta
+                AND RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra','PPP')
+                AND ISNULL(L.Tipo_enferm, '') <> 'Maternal'
+                ${dynamicFilters}
+                GROUP BY P.[RUT EMPLEADO]
+                HAVING SUM(L.NumDias) >= @MinDias
+            )
+            SELECT 
+                P.[RUT EMPLEADO] + '-' + P.DV AS Rut,
+                P.NOMBRE AS Nombre,
+                P.PATERNO + ' ' + P.MATERNO AS Apellidos,
+                P.NOMBRE_SUCURSAL AS Cenco,
+                L.Recepcion AS Fecha_Recepcion,
+                L.NumeroLicencia, 
+                L.Desde, 
+                L.hasta as Hasta,
+                L.Observacion,
+                P.VIGENCIA AS Vigencia
+            FROM dbo.LIC_LICENCIA_ACTUAL L
+            INNER JOIN dbo.Personal P ON L.RutFuncionario = P.[RUT EMPLEADO]
+            INNER JOIN dbo.LIC_PAGO_ACTUAL LPA ON L.NumeroLicencia = LPA.NumeroLicencia
+            INNER JOIN Filtrados F ON P.[RUT EMPLEADO] = F.[RUT EMPLEADO]
+            WHERE L.Desde >= @Desde AND L.hasta <= @Hasta
+            AND RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra','PPP')
+            AND ISNULL(L.Tipo_enferm, '') <> 'Maternal'
+            ORDER BY P.[RUT EMPLEADO], L.Desde DESC
+        `;
+
+        const result = await reqDb.query(query);
+        res.json({ status: 'ok', data: result.recordset });
+    } catch (err) {
+        console.error("Error en info-gestion/funcionarios/detalle-global:", err);
+        res.status(500).json({ error: "Error al obtener detalle global", details: err.message });
     }
 });
 
