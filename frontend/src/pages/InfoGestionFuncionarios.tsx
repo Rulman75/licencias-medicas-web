@@ -260,7 +260,7 @@ export default function InfoGestionFuncionarios() {
                   <th className="px-4 py-3">Sector</th>
                   <th className="px-4 py-3">Unidad</th>
                   <th className="px-4 py-3">Días</th>
-                  <th className="px-4 py-3 text-center">Vigencia</th>
+                  <th className="px-4 py-3 text-center">Lic. Vigente</th>
                   <th className="px-4 py-3 text-center">Acción</th>
                 </tr>
               </thead>
