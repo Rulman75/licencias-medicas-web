@@ -44,6 +44,12 @@ const mapTipoAlta = (tipo) => {
     return 'NI';
 };
 
+const cleanRut = (rawRut) => {
+    if (!rawRut) return '';
+    const parts = String(rawRut).split('-');
+    return parts[0].trim();
+};
+
 router.post('/preview', upload.fields([{ name: 'fileSiniestros', maxCount: 1 }, { name: 'fileAccidentabilidad', maxCount: 1 }]), async (req, res) => {
     try {
         if (!req.files || !req.files['fileSiniestros'] || !req.files['fileAccidentabilidad']) {
@@ -88,7 +94,7 @@ router.post('/preview', upload.fields([{ name: 'fileSiniestros', maxCount: 1 }, 
             if (!numero) continue;
             numero = formatLicencia(numero);
 
-            let rut = row['Rut usuario'];
+            let rut = cleanRut(row['Rut usuario']);
             let nombre = row['Nombre de usuario'];
             let desde = parseDate(row['Fecha de inicio del reposo']);
             let hasta = parseDate(row['Fecha de alta']);
