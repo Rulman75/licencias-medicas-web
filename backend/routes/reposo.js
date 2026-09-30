@@ -299,22 +299,49 @@ router.post('/procesar', async (req, res) => {
             try {
                 const reqSuffix = new sql.Request(transaction);
                 reqSuffix.input('BaseNum', sql.NVarChar, item.NumeroLicencia);
-                reqSuffix.input('LikeNum', sql.NVarChar, `${item.NumeroLicencia}-%`);
+                reqSuffix.input('LikeNum', sql.NVarChar, `${item.NumeroLicencia}%`);
                 const suffRes = await reqSuffix.query(`
-                    SELECT NumeroLicencia FROM LIC_LICENCIA_ACTUAL 
+                    SELECT NumeroLicencia, CONVERT(varchar, Desde, 23) as Desde, CONVERT(varchar, Hasta, 23) as Hasta 
+                    FROM LIC_LICENCIA_ACTUAL 
                     WHERE NumeroLicencia = @BaseNum OR NumeroLicencia LIKE @LikeNum
                 `);
                 
+                let alreadyExists = false;
                 let maxSuffix = 0;
+                
                 suffRes.recordset.forEach(r => {
-                    if (r.NumeroLicencia.includes('-')) {
-                        const parts = r.NumeroLicencia.split('-');
-                        const num = parseInt(parts[parts.length - 1], 10);
-                        if (!isNaN(num) && num > maxSuffix) maxSuffix = num;
+                    if (r.Desde === item.Desde && r.Hasta === item.Hasta) {
+                        alreadyExists = true;
+                    }
+                    if (r.NumeroLicencia !== item.NumeroLicencia && r.NumeroLicencia.startsWith(item.NumeroLicencia)) {
+                        const suffixStr = r.NumeroLicencia.substring(item.NumeroLicencia.length);
+                        const num = parseInt(suffixStr, 10);
+                        if (!isNaN(num) && String(num) === suffixStr) {
+                            if (num > maxSuffix) maxSuffix = num;
+                        }
                     }
                 });
 
-                const newNumero = `${item.NumeroLicencia}-${maxSuffix + 1}`;
+                if (alreadyExists) {
+                    continue; // "si coinciden es el misma licencia por li cual no haces nada"
+                }
+
+                const newNumero = `${item.NumeroLicencia}${maxSuffix + 1}`; // "sin el guion"
+
+                // "agregar una marca en la tabla LIC_LICENCIA_ACTUAL en la cual indique que ese siniestro tiene extensión"
+                const reqUpdBase = new sql.Request(transaction);
+                reqUpdBase.input('BaseNum', sql.NVarChar, item.NumeroLicencia);
+                reqUpdBase.input('ExtMsg', sql.NVarChar, `TIENE EXTENSION: ${newNumero}`);
+                await reqUpdBase.query(`
+                    UPDATE LIC_LICENCIA_ACTUAL 
+                    SET Observacion_CajaLA = 
+                        CASE 
+                            WHEN Observacion_CajaLA IS NULL OR RTRIM(Observacion_CajaLA) = '' THEN @ExtMsg
+                            WHEN Observacion_CajaLA NOT LIKE '%' + @ExtMsg + '%' THEN RTRIM(Observacion_CajaLA) + ' | ' + @ExtMsg
+                            ELSE Observacion_CajaLA
+                        END
+                    WHERE NumeroLicencia = @BaseNum
+                `);
 
                 const reqDb = new sql.Request(transaction);
                 reqDb.input('NumeroLicencia', sql.NVarChar, newNumero);
@@ -350,7 +377,7 @@ router.post('/procesar', async (req, res) => {
                         0, '', 'ACHS OR', '', 0, NULL, '',
                         'false', 'false', 'false', 'false', '', '', 'Oden Reposo',
                         @Usuario, CONVERT(varchar, GETDATE(), 20), '', '', 0, '',
-                        '', 0, NULL
+                        'ACHS OR REINGRESO', 0, NULL
                     )
                 `);
 
