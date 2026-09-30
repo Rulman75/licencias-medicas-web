@@ -334,11 +334,11 @@ router.post('/procesar', async (req, res) => {
                 reqUpdBase.input('ExtMsg', sql.NVarChar, `TIENE EXTENSION: ${newNumero}`);
                 await reqUpdBase.query(`
                     UPDATE LIC_LICENCIA_ACTUAL 
-                    SET Observacion_CajaLA = 
+                    SET Observacion = 
                         CASE 
-                            WHEN Observacion_CajaLA IS NULL OR RTRIM(Observacion_CajaLA) = '' THEN @ExtMsg
-                            WHEN Observacion_CajaLA NOT LIKE '%' + @ExtMsg + '%' THEN RTRIM(Observacion_CajaLA) + ' | ' + @ExtMsg
-                            ELSE Observacion_CajaLA
+                            WHEN Observacion IS NULL OR RTRIM(Observacion) = '' THEN @ExtMsg
+                            WHEN Observacion NOT LIKE '%' + @ExtMsg + '%' THEN RTRIM(Observacion) + ' | ' + @ExtMsg
+                            ELSE Observacion
                         END
                     WHERE NumeroLicencia = @BaseNum
                 `);
@@ -373,11 +373,11 @@ router.post('/procesar', async (req, res) => {
                         @NumeroLicencia, @RutFuncionario, @Desde, @Hasta, @NumDias,
                         @Recepcion, @Remision, @Tipo_enferm, @Tipo_Siniestro, @Obser_apelacion, @altaAchs,
                         NULL, NULL, '', 0, 0, 0,
-                        'ACHS OR', NULL, NULL, NULL, '', '',
+                        'ACHS OR REINGRESO', NULL, NULL, NULL, '', '',
                         0, '', 'ACHS OR', '', 0, NULL, '',
                         'false', 'false', 'false', 'false', '', '', 'Oden Reposo',
                         @Usuario, CONVERT(varchar, GETDATE(), 20), '', '', 0, '',
-                        'ACHS OR REINGRESO', 0, NULL
+                        '', 0, NULL
                     )
                 `);
 
