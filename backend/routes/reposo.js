@@ -217,10 +217,10 @@ router.post('/procesar', async (req, res) => {
         const finalUserName = (userName || 'Sistema') + ' LMW';
         const reqLog = new sql.Request(transaction);
         reqLog.input('NombreArchivo', sql.NVarChar, fileName || '');
-        reqLog.input('Total', sql.Int, nuevos.length + nuevos_existentes.length + actualizados.length);
+        reqLog.input('Total', sql.Int, nuevos.length + actualizados.length);
         reqLog.input('Nuevos', sql.Int, nuevos.length);
         reqLog.input('Act', sql.Int, actualizados.length);
-        reqLog.input('NuevosExt', sql.Int, nuevos_existentes.length);
+        reqLog.input('NuevosExt', sql.Int, 0);
         reqLog.input('User', sql.NVarChar, finalUserName);
         const bitacoraRes = await reqLog.query(`
             INSERT INTO LIC_BITACORA_ARCHIVOS (NombreArchivo, TotalRegistros, RegistrosNuevos, RegistrosActualizados, RegistrosNuevosReposos, Usuario, FechaProceso)
@@ -295,7 +295,8 @@ router.post('/procesar', async (req, res) => {
             }
         }
 
-        for (const item of nuevos_existentes) {
+        // Desactivado temporalmente por petición del usuario: no procesar la pestaña Nuevo Reposo Existente
+        for (const item of []) { // nuevos_existentes
             try {
                 const reqSuffix = new sql.Request(transaction);
                 reqSuffix.input('BaseNum', sql.NVarChar, item.NumeroLicencia);
