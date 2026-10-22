@@ -50,6 +50,16 @@ const cleanRut = (rawRut) => {
     return parts[0].trim();
 };
 
+// Helper para calcular días inclusivos entre Desde y Hasta (YYYY-MM-DD)
+const calcDiasSistema = (desde, hasta) => {
+    if (!desde || !hasta) return 0;
+    const d1 = new Date(`${desde}T00:00:00Z`);
+    const d2 = new Date(`${hasta}T00:00:00Z`);
+    if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return 0;
+    const diffDays = Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    return diffDays > 0 ? diffDays : 0;
+};
+
 router.post('/preview', upload.fields([{ name: 'fileSiniestros', maxCount: 1 }, { name: 'fileAccidentabilidad', maxCount: 1 }]), async (req, res) => {
     try {
         if (!req.files || !req.files['fileSiniestros'] || !req.files['fileAccidentabilidad']) {
@@ -182,6 +192,7 @@ router.post('/preview', upload.fields([{ name: 'fileSiniestros', maxCount: 1 }, 
                 if (changedDesde) {
                     nuevos_existentes.push({
                         ...row,
+                        DiasCalculoSistema: calcDiasSistema(row.Desde, row.Hasta),
                         DbDesde: dbRow.Desde,
                         DbHasta: dbRow.Hasta
                     });
@@ -217,10 +228,10 @@ router.post('/procesar', async (req, res) => {
         const finalUserName = (userName || 'Sistema') + ' LMW';
         const reqLog = new sql.Request(transaction);
         reqLog.input('NombreArchivo', sql.NVarChar, fileName || '');
-        reqLog.input('Total', sql.Int, nuevos.length + actualizados.length);
+        reqLog.input('Total', sql.Int, nuevos.length + nuevos_existentes.length + actualizados.length);
         reqLog.input('Nuevos', sql.Int, nuevos.length);
         reqLog.input('Act', sql.Int, actualizados.length);
-        reqLog.input('NuevosExt', sql.Int, 0);
+        reqLog.input('NuevosExt', sql.Int, nuevos_existentes.length);
         reqLog.input('User', sql.NVarChar, finalUserName);
         const bitacoraRes = await reqLog.query(`
             INSERT INTO LIC_BITACORA_ARCHIVOS (NombreArchivo, TotalRegistros, RegistrosNuevos, RegistrosActualizados, RegistrosNuevosReposos, Usuario, FechaProceso)
@@ -295,8 +306,7 @@ router.post('/procesar', async (req, res) => {
             }
         }
 
-        // Desactivado temporalmente por petición del usuario: no procesar la pestaña Nuevo Reposo Existente
-        for (const item of []) { // nuevos_existentes
+        for (const item of nuevos_existentes) {
             try {
                 const reqSuffix = new sql.Request(transaction);
                 reqSuffix.input('BaseNum', sql.NVarChar, item.NumeroLicencia);
@@ -329,6 +339,11 @@ router.post('/procesar', async (req, res) => {
 
                 const newNumero = `${item.NumeroLicencia}${maxSuffix + 1}`; // "sin el guion"
 
+                // Si los DIAS que venían en la planilla es 0 o 1, insertamos 0; de lo contrario, insertamos los días calculados por sistema
+                const diasPlanilla = Number(item.NumDias || 0);
+                const diasCalculados = item.DiasCalculoSistema !== undefined ? Number(item.DiasCalculoSistema) : calcDiasSistema(item.Desde, item.Hasta);
+                const finalNumDias = (diasPlanilla === 0 || diasPlanilla === 1) ? 0 : diasCalculados;
+
                 // "agregar una marca en la tabla LIC_LICENCIA_ACTUAL en la cual indique que ese siniestro tiene extensión"
                 const reqUpdBase = new sql.Request(transaction);
                 reqUpdBase.input('BaseNum', sql.NVarChar, item.NumeroLicencia);
@@ -349,7 +364,7 @@ router.post('/procesar', async (req, res) => {
                 reqDb.input('RutFuncionario', sql.NVarChar, item.RutFuncionario || null);
                 reqDb.input('Desde', sql.Date, item.Desde || null);
                 reqDb.input('Hasta', sql.Date, item.Hasta || null);
-                reqDb.input('NumDias', sql.Int, item.NumDias || 0);
+                reqDb.input('NumDias', sql.Int, finalNumDias);
                 
                 reqDb.input('Recepcion', sql.Date, item.Recepcion || null);
                 reqDb.input('Remision', sql.Date, item.Recepcion || null);
@@ -384,7 +399,7 @@ router.post('/procesar', async (req, res) => {
 
                 const reqPago = new sql.Request(transaction);
                 reqPago.input('NumeroLicencia', sql.NVarChar, newNumero);
-                reqPago.input('NumDiasLicencia', sql.Int, item.NumDias || 0);
+                reqPago.input('NumDiasLicencia', sql.Int, finalNumDias);
                 await reqPago.query(`
                     INSERT INTO LIC_PAGO_ACTUAL (NumeroLicencia, NumDiasLicencia)
                     VALUES (@NumeroLicencia, @NumDiasLicencia)

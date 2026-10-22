@@ -9,6 +9,7 @@ interface PreviewItem {
   Desde: string;
   Hasta: string;
   NumDias: number;
+  DiasCalculoSistema?: number;
   DbDesde?: string;
   DbHasta?: string;
 }
@@ -152,6 +153,8 @@ export default function CargaReposo() {
   const renderTable = (data: PreviewItem[], isModified: boolean = false, tabName: string) => {
     if (data.length === 0) return <p className="text-gray-500 py-4">No hay registros en esta categoría.</p>;
 
+    const showCalculoSistema = tabName === 'nuevos_existentes';
+
     return (
       <div className="flex flex-col gap-2">
         <div className="flex justify-end">
@@ -170,7 +173,10 @@ export default function CargaReposo() {
               <th className="p-3">N° Licencia</th>
               <th className="p-3">RUT</th>
               <th className="p-3">Nombre</th>
-              <th className="p-3">Días</th>
+              <th className="p-3 text-center">Días</th>
+              {showCalculoSistema && (
+                <th className="p-3 text-center bg-blue-50 text-blue-800 border-x border-blue-200">Días Cálculo Sistema</th>
+              )}
               <th className="p-3">Desde (Excel)</th>
               <th className="p-3">Hasta (Excel)</th>
               {isModified && (
@@ -188,6 +194,11 @@ export default function CargaReposo() {
                 <td className="p-3">{row.RutFuncionario}</td>
                 <td className="p-3 truncate max-w-xs" title={row.Nombre}>{row.Nombre}</td>
                 <td className="p-3 text-center">{row.NumDias}</td>
+                {showCalculoSistema && (
+                  <td className="p-3 text-center font-bold text-blue-800 bg-blue-50 border-x border-blue-100">
+                    {row.DiasCalculoSistema ?? '-'}
+                  </td>
+                )}
                 <td className={`p-3 ${isModified && row.Desde !== row.DbDesde ? 'bg-green-100 font-bold text-green-800' : ''}`}>
                   {formatDate(row.Desde)}
                 </td>
