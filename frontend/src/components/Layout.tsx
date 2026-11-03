@@ -29,6 +29,11 @@ export default function Layout() {
         if (tipoUser === 'M') {
           setMenuPrevencionOpen(true);
         }
+        if (tipoUser === 'G') {
+          setMenuLicenciasOpen(true);
+          setMenuReposoOpen(true);
+          setMenuInfoGestionOpen(true);
+        }
       } catch (e) {
         console.error('Error decoding token');
         navigate('/login');
@@ -64,531 +69,646 @@ export default function Layout() {
   const puedeVerBRP = MOSTRAR_MODULOS_OCULTOS && (esAdmin || userData.tipo === 'P');
 
   return (
-    <div className="flex h-screen bg-[#f4f7f6] font-sans text-[#1e293b]">
-      {/* Sidebar Corporativo */}
-      <aside className="w-[265px] bg-white border-r border-[#e2e8f0] flex flex-col shrink-0 print:hidden">
-        {/* Logo / Header del Sidebar */}
-        <div className="p-6 flex flex-col items-center border-b border-[#e2e8f0]">
-          <img src="/logo.png" alt="CMDS Logo" className="w-full max-w-[140px] h-auto object-contain mb-2" />
-          <span className="text-[1rem] text-[#64748b] text-center font-semibold leading-tight mt-2">
-            Sistema de<br />Licencias Médicas
-          </span>
+    <div className="flex flex-col md:flex-row h-screen bg-[#f4f7f6] font-sans text-[#1e293b] print:bg-white print:h-auto">
+      {/* Sidebar Corporativo CMDS (Idéntico a Sistema de Archivo) */}
+      <aside className="w-full md:w-[265px] bg-[#016098] text-white shrink-0 shadow-lg flex flex-col justify-between print:hidden">
+        <div className="p-4 overflow-y-auto max-h-[calc(100vh-76px)] custom-scrollbar">
+          {/* Logo / Header del Sidebar */}
+          <div className="flex flex-col items-center pb-5 mb-5 border-b border-white/20 text-center">
+            <img
+              src="/logo.png"
+              alt="Logo CMDS"
+              className="max-w-[90px] h-auto mb-2.5 bg-white p-2 rounded-lg shadow-md"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+            <h4 className="text-[1.05rem] font-bold tracking-wide m-0 leading-tight">
+              Sistema de Licencias Médicas
+            </h4>
+            <p className="text-[0.72rem] text-blue-200 mt-0.5">
+              Gestión, Subsidios y Control CMDS
+            </p>
 
-          {userData.username && (
-            <div className="flex items-center gap-2 text-xs text-[#016098] bg-[#e0f2fe] px-3 py-1.5 rounded-full mt-4 font-medium uppercase tracking-wide">
-              <span className="w-1.5 h-1.5 bg-[#39BABD] rounded-full"></span>
-              <span>{userData.username}</span>
-              <span className="text-[10px] bg-[#016098] text-white px-1.5 py-0.5 rounded-full font-bold">
-                {userData.tipo}
-              </span>
-            </div>
-          )}
-        </div>
+            {userData.username && (
+              <div className="mt-3 bg-[#024a8d] px-3 py-1.5 rounded-full text-xs font-medium text-blue-100 flex items-center gap-1.5 border border-white/10 shadow-inner">
+                <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
+                <span className="truncate max-w-[130px]">{userData.username}</span>
+                <span className="text-[10px] bg-blue-800 px-1.5 py-0.5 rounded text-blue-200 uppercase">
+                  {userData.tipo}
+                </span>
+              </div>
+            )}
+          </div>
 
-        {/* Navegación */}
-        <nav className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-          <ul className="space-y-1">
-            {/* Inicio */}
-            <li>
-              <Link
-                to="/inicio"
-                className={`flex items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                  isActive('/inicio')
-                    ? 'bg-[#016098] text-white'
-                    : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                }`}
-              >
-                Inicio
-              </Link>
-            </li>
+          {/* Navegación */}
+          <nav className="space-y-1 text-sm">
+            {/* 1. Inicio */}
+            <Link
+              to="/inicio"
+              className={`flex items-center gap-2.5 py-2.5 px-3 rounded-lg transition-colors font-semibold ${
+                isActive('/inicio') ? 'bg-[#39BABD] text-white shadow-sm' : 'text-white/90 hover:bg-white/10'
+              }`}
+            >
+              <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
+                />
+              </svg>
+              <span>Inicio (Dashboard)</span>
+            </Link>
 
             {/* Mantención Operativa (Fase 1) */}
             {puedeVerMantencion && (
-              <li className="pt-2">
+              <div className="pt-1">
                 <button
                   onClick={() => setMenuMantencionOpen(!menuMantencionOpen)}
-                  className={`flex justify-between items-center w-full px-4 py-3 text-sm font-bold rounded-lg transition-colors duration-200 ${
-                    menuMantencionOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                  }`}
+                  className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg text-white/90 hover:bg-white/10 transition-colors font-semibold text-left"
                 >
-                  <span>Mantención Operativa</span>
-                  <span className="text-xs">{menuMantencionOpen ? '▼' : '▶'}</span>
+                  <span className="flex items-center gap-2.5">
+                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
+                    </svg>
+                    <span>Mantención Operativa</span>
+                  </span>
+                  <svg
+                    className={`w-3.5 h-3.5 transition-transform ${menuMantencionOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                  </svg>
                 </button>
+
                 {menuMantencionOpen && (
-                  <ul className="mt-1 space-y-1 pl-4">
-                    <li>
-                      <Link
-                        to="/mantencion/licencias"
-                        className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                          isActive('/mantencion/licencias')
-                            ? 'bg-[#016098] text-white'
-                            : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                        }`}
-                      >
-                        Ingreso Licencias Médicas
-                      </Link>
-                    </li>
-                    <li>
-                      <Link
-                        to="/mantencion/pagos"
-                        className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                          isActive('/mantencion/pagos')
-                            ? 'bg-[#016098] text-white'
-                            : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                        }`}
-                      >
-                        Ingreso Pagos y Cheques
-                      </Link>
-                    </li>
-                  </ul>
+                  <div className="ml-4 pl-3 border-l border-white/20 space-y-1 mt-1 text-xs">
+                    <Link
+                      to="/mantencion/licencias"
+                      className={`block py-2 px-3 rounded-md transition-colors ${
+                        isActive('/mantencion/licencias')
+                          ? 'bg-[#39BABD] text-white font-bold'
+                          : 'text-blue-100 hover:bg-white/10'
+                      }`}
+                    >
+                      1. Ingreso Licencias Médicas
+                    </Link>
+                    <Link
+                      to="/mantencion/pagos"
+                      className={`block py-2 px-3 rounded-md transition-colors ${
+                        isActive('/mantencion/pagos')
+                          ? 'bg-[#39BABD] text-white font-bold'
+                          : 'text-blue-100 hover:bg-white/10'
+                      }`}
+                    >
+                      2. Ingreso Pagos y Cheques
+                    </Link>
+                  </div>
                 )}
-              </li>
+              </div>
             )}
 
             {/* Pagos Masivos (Fase 2) */}
             {puedeVerMantencion && (
-              <li className="pt-2">
+              <div className="pt-1">
                 <button
                   onClick={() => setMenuPagosMasivosOpen(!menuPagosMasivosOpen)}
-                  className={`flex justify-between items-center w-full px-4 py-3 text-sm font-bold rounded-lg transition-colors duration-200 ${
-                    menuPagosMasivosOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                  }`}
+                  className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg text-white/90 hover:bg-white/10 transition-colors font-semibold text-left"
                 >
-                  <span>Pagos Masivos</span>
-                  <span className="text-xs">{menuPagosMasivosOpen ? '▼' : '▶'}</span>
+                  <span className="flex items-center gap-2.5">
+                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+                      />
+                    </svg>
+                    <span>Pagos Masivos</span>
+                  </span>
+                  <svg
+                    className={`w-3.5 h-3.5 transition-transform ${menuPagosMasivosOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                  </svg>
                 </button>
+
                 {menuPagosMasivosOpen && (
-                  <ul className="mt-1 space-y-1 pl-4">
-                    <li>
-                      <Link
-                        to="/pagos-masivos/importar"
-                        className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                          isActive('/pagos-masivos/importar')
-                            ? 'bg-[#016098] text-white'
-                            : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                        }`}
-                      >
-                        Importar Pagos Masivos
-                      </Link>
-                    </li>
-                    <li>
-                      <Link
-                        to="/pagos-masivos/auditar"
-                        className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                          isActive('/pagos-masivos/auditar')
-                            ? 'bg-[#016098] text-white'
-                            : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                        }`}
-                      >
-                        Auditar Pagos Masivos
-                      </Link>
-                    </li>
-                    <li>
-                      <Link
-                        to="/pagos-masivos/eliminar"
-                        className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                          isActive('/pagos-masivos/eliminar')
-                            ? 'bg-[#EB567F] text-white'
-                            : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#EB567F]'
-                        }`}
-                      >
-                        Eliminar Pago Masivo
-                      </Link>
-                    </li>
-                  </ul>
+                  <div className="ml-4 pl-3 border-l border-white/20 space-y-1 mt-1 text-xs">
+                    <Link
+                      to="/pagos-masivos/importar"
+                      className={`block py-2 px-3 rounded-md transition-colors ${
+                        isActive('/pagos-masivos/importar')
+                          ? 'bg-[#39BABD] text-white font-bold'
+                          : 'text-blue-100 hover:bg-white/10'
+                      }`}
+                    >
+                      1. Importar Pagos Masivos
+                    </Link>
+                    <Link
+                      to="/pagos-masivos/auditar"
+                      className={`block py-2 px-3 rounded-md transition-colors ${
+                        isActive('/pagos-masivos/auditar')
+                          ? 'bg-[#39BABD] text-white font-bold'
+                          : 'text-blue-100 hover:bg-white/10'
+                      }`}
+                    >
+                      2. Auditar Pagos Masivos
+                    </Link>
+                    <Link
+                      to="/pagos-masivos/eliminar"
+                      className={`block py-2 px-3 rounded-md transition-colors ${
+                        isActive('/pagos-masivos/eliminar')
+                          ? 'bg-[#EB567F] text-white font-bold'
+                          : 'text-blue-100 hover:bg-white/10'
+                      }`}
+                    >
+                      3. Eliminar Pago Masivo
+                    </Link>
+                  </div>
                 )}
-              </li>
+              </div>
             )}
 
             {/* Dep. Prevención / Mutual (Oculto temporalmente a solicitud del usuario) */}
             {puedeVerPrevencion && (
-              <li className="pt-2">
+              <div className="pt-1">
                 <button
                   onClick={() => setMenuPrevencionOpen(!menuPrevencionOpen)}
-                  className={`flex justify-between items-center w-full px-4 py-3 text-sm font-bold rounded-lg transition-colors duration-200 ${
-                    menuPrevencionOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                  }`}
+                  className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg text-white/90 hover:bg-white/10 transition-colors font-semibold text-left"
                 >
-                  <span>Dep. Prevención</span>
-                  <span className="text-xs">{menuPrevencionOpen ? '▼' : '▶'}</span>
+                  <span className="flex items-center gap-2.5">
+                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+                      />
+                    </svg>
+                    <span>Dep. Prevención</span>
+                  </span>
+                  <svg
+                    className={`w-3.5 h-3.5 transition-transform ${menuPrevencionOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                  </svg>
                 </button>
+
                 {menuPrevencionOpen && (
-                  <ul className="mt-1 space-y-1 pl-4">
-                    <li>
-                      <Link
-                        to="/prevencion/licencias-mutual"
-                        className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                          isActive('/prevencion/licencias-mutual')
-                            ? 'bg-[#016098] text-white'
-                            : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                        }`}
-                      >
-                        Ingreso Licencias Mutual
-                      </Link>
-                    </li>
-                  </ul>
+                  <div className="ml-4 pl-3 border-l border-white/20 space-y-1 mt-1 text-xs">
+                    <Link
+                      to="/prevencion/licencias-mutual"
+                      className={`block py-2 px-3 rounded-md transition-colors ${
+                        isActive('/prevencion/licencias-mutual')
+                          ? 'bg-[#39BABD] text-white font-bold'
+                          : 'text-blue-100 hover:bg-white/10'
+                      }`}
+                    >
+                      Ingreso Licencias Mutual
+                    </Link>
+                  </div>
                 )}
-              </li>
+              </div>
             )}
 
             {/* Certificados y Nóminas (Fase 3) - No visible para Perfil 'G' */}
             {puedeVerCertificadosEInformesMigrados && (
-              <li className="pt-2">
+              <div className="pt-1">
                 <button
                   onClick={() => setMenuCertificadosOpen(!menuCertificadosOpen)}
-                  className={`flex justify-between items-center w-full px-4 py-3 text-sm font-bold rounded-lg transition-colors duration-200 ${
-                    menuCertificadosOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                  }`}
+                  className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg text-white/90 hover:bg-white/10 transition-colors font-semibold text-left"
                 >
-                  <span>Certificados y Nóminas</span>
-                  <span className="text-xs">{menuCertificadosOpen ? '▼' : '▶'}</span>
+                  <span className="flex items-center gap-2.5">
+                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
+                      />
+                    </svg>
+                    <span>Certificados y Nóminas</span>
+                  </span>
+                  <svg
+                    className={`w-3.5 h-3.5 transition-transform ${menuCertificadosOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                  </svg>
                 </button>
+
                 {menuCertificadosOpen && (
-                  <ul className="mt-1 space-y-1 pl-4">
-                    <li>
-                      <Link
-                        to="/certificados/licencia"
-                        className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                          isActive('/certificados/licencia')
-                            ? 'bg-[#016098] text-white'
-                            : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                        }`}
-                      >
-                        Certificado de Licencia
-                      </Link>
-                    </li>
+                  <div className="ml-4 pl-3 border-l border-white/20 space-y-1 mt-1 text-xs">
+                    <Link
+                      to="/certificados/licencia"
+                      className={`block py-2 px-3 rounded-md transition-colors ${
+                        isActive('/certificados/licencia')
+                          ? 'bg-[#39BABD] text-white font-bold'
+                          : 'text-blue-100 hover:bg-white/10'
+                      }`}
+                    >
+                      1. Certificado de Licencia
+                    </Link>
                     {esAdmin && (
                       <>
-                        <li>
-                          <Link
-                            to="/certificados/nomina-normal"
-                            className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                              isActive('/certificados/nomina-normal')
-                                ? 'bg-[#016098] text-white'
-                                : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                            }`}
-                          >
-                            Nómina Correspondencia
-                          </Link>
-                        </li>
-                        <li>
-                          <Link
-                            to="/certificados/nomina-pago-directo"
-                            className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                              isActive('/certificados/nomina-pago-directo')
-                                ? 'bg-[#016098] text-white'
-                                : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                            }`}
-                          >
-                            Nómina Pago Directo
-                          </Link>
-                        </li>
+                        <Link
+                          to="/certificados/nomina-normal"
+                          className={`block py-2 px-3 rounded-md transition-colors ${
+                            isActive('/certificados/nomina-normal')
+                              ? 'bg-[#39BABD] text-white font-bold'
+                              : 'text-blue-100 hover:bg-white/10'
+                          }`}
+                        >
+                          2. Nómina Correspondencia
+                        </Link>
+                        <Link
+                          to="/certificados/nomina-pago-directo"
+                          className={`block py-2 px-3 rounded-md transition-colors ${
+                            isActive('/certificados/nomina-pago-directo')
+                              ? 'bg-[#39BABD] text-white font-bold'
+                              : 'text-blue-100 hover:bg-white/10'
+                          }`}
+                        >
+                          3. Nómina Pago Directo
+                        </Link>
                       </>
                     )}
-                  </ul>
+                  </div>
                 )}
-              </li>
+              </div>
             )}
 
             {/* Informes Operativos (Fase 3) - No visible para Perfil 'G' */}
             {puedeVerCertificadosEInformesMigrados && (
-              <li className="pt-2">
+              <div className="pt-1">
                 <button
                   onClick={() => setMenuInformesLegacyOpen(!menuInformesLegacyOpen)}
-                  className={`flex justify-between items-center w-full px-4 py-3 text-sm font-bold rounded-lg transition-colors duration-200 ${
-                    menuInformesLegacyOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                  }`}
+                  className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg text-white/90 hover:bg-white/10 transition-colors font-semibold text-left"
                 >
-                  <span>Informes Operativos</span>
-                  <span className="text-xs">{menuInformesLegacyOpen ? '▼' : '▶'}</span>
+                  <span className="flex items-center gap-2.5">
+                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                      />
+                    </svg>
+                    <span>Informes Operativos</span>
+                  </span>
+                  <svg
+                    className={`w-3.5 h-3.5 transition-transform ${menuInformesLegacyOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                  </svg>
                 </button>
+
                 {menuInformesLegacyOpen && (
-                  <ul className="mt-1 space-y-1 pl-4">
-                    <li>
+                  <div className="ml-4 pl-3 border-l border-white/20 space-y-1 mt-1 text-xs">
+                    <Link
+                      to="/informes/por-funcionario"
+                      className={`block py-2 px-3 rounded-md transition-colors ${
+                        isActive('/informes/por-funcionario')
+                          ? 'bg-[#39BABD] text-white font-bold'
+                          : 'text-blue-100 hover:bg-white/10'
+                      }`}
+                    >
+                      1. Ficha y Deuda Funcionario
+                    </Link>
+                    {esAdmin && (
                       <Link
-                        to="/informes/por-funcionario"
-                        className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                          isActive('/informes/por-funcionario')
-                            ? 'bg-[#016098] text-white'
-                            : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
+                        to="/informes/diarias"
+                        className={`block py-2 px-3 rounded-md transition-colors ${
+                          isActive('/informes/diarias')
+                            ? 'bg-[#39BABD] text-white font-bold'
+                            : 'text-blue-100 hover:bg-white/10'
                         }`}
                       >
-                        Ficha y Deuda Funcionario
+                        2. Recepción Diaria Licencias
                       </Link>
-                    </li>
-                    {esAdmin && (
-                      <li>
-                        <Link
-                          to="/informes/diarias"
-                          className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                            isActive('/informes/diarias')
-                              ? 'bg-[#016098] text-white'
-                              : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                          }`}
-                        >
-                          Recepción Diaria Licencias
-                        </Link>
-                      </li>
                     )}
                     {puedeVerBRP && (
-                      <li>
-                        <Link
-                          to="/informes/brp"
-                          className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                            isActive('/informes/brp')
-                              ? 'bg-[#016098] text-white'
-                              : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                          }`}
-                        >
-                          Informe Licencias BRP
-                        </Link>
-                      </li>
+                      <Link
+                        to="/informes/brp"
+                        className={`block py-2 px-3 rounded-md transition-colors ${
+                          isActive('/informes/brp')
+                            ? 'bg-[#39BABD] text-white font-bold'
+                            : 'text-blue-100 hover:bg-white/10'
+                        }`}
+                      >
+                        Informe Licencias BRP
+                      </Link>
                     )}
                     {esAdmin && (
                       <>
-                        <li>
-                          <Link
-                            to="/informes/pago-directo"
-                            className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                              isActive('/informes/pago-directo')
-                                ? 'bg-[#016098] text-white'
-                                : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                            }`}
-                          >
-                            Pago Directo Mensual
-                          </Link>
-                        </li>
-                        <li>
-                          <Link
-                            to="/informes/general-pagos"
-                            className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                              isActive('/informes/general-pagos')
-                                ? 'bg-[#016098] text-white'
-                                : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                            }`}
-                          >
-                            Anual Pagadas / Impagas
-                          </Link>
-                        </li>
+                        <Link
+                          to="/informes/pago-directo"
+                          className={`block py-2 px-3 rounded-md transition-colors ${
+                            isActive('/informes/pago-directo')
+                              ? 'bg-[#39BABD] text-white font-bold'
+                              : 'text-blue-100 hover:bg-white/10'
+                          }`}
+                        >
+                          3. Pago Directo Mensual
+                        </Link>
+                        <Link
+                          to="/informes/general-pagos"
+                          className={`block py-2 px-3 rounded-md transition-colors ${
+                            isActive('/informes/general-pagos')
+                              ? 'bg-[#39BABD] text-white font-bold'
+                              : 'text-blue-100 hover:bg-white/10'
+                          }`}
+                        >
+                          4. Anual Pagadas / Impagas
+                        </Link>
                         {MOSTRAR_MODULOS_OCULTOS && (
-                          <li>
-                            <Link
-                              to="/informes/softland"
-                              className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                                isActive('/informes/softland')
-                                  ? 'bg-[#39BABD] text-white'
-                                  : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                              }`}
-                            >
-                              Captura Softland
-                            </Link>
-                          </li>
+                          <Link
+                            to="/informes/softland"
+                            className={`block py-2 px-3 rounded-md transition-colors ${
+                              isActive('/informes/softland')
+                                ? 'bg-[#39BABD] text-white font-bold'
+                                : 'text-blue-100 hover:bg-white/10'
+                            }`}
+                          >
+                            Captura Softland
+                          </Link>
                         )}
                       </>
                     )}
-                  </ul>
+                  </div>
                 )}
-              </li>
+              </div>
             )}
 
             {/* Licencias Médicas Convenio */}
-            <li className="pt-2">
+            <div className="pt-1">
               <button
                 onClick={() => setMenuLicenciasOpen(!menuLicenciasOpen)}
-                className={`flex justify-between items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                  menuLicenciasOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                }`}
+                className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg text-white/90 hover:bg-white/10 transition-colors font-semibold text-left"
               >
-                <span>Licencias Médicas Convenio</span>
-                <span className="text-xs">{menuLicenciasOpen ? '▼' : '▶'}</span>
+                <span className="flex items-center gap-2.5">
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"
+                    />
+                  </svg>
+                  <span>Licencias Médicas Convenio</span>
+                </span>
+                <svg
+                  className={`w-3.5 h-3.5 transition-transform ${menuLicenciasOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
               </button>
+
               {menuLicenciasOpen && (
-                <ul className="mt-1 space-y-1 pl-4">
-                  <li>
-                    <Link
-                      to="/licencias/estadisticas"
-                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                        isActive('/licencias/estadisticas')
-                          ? 'bg-[#016098] text-white'
-                          : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                      }`}
-                    >
-                      Estadistica Recupero
-                    </Link>
-                  </li>
-                  <li>
-                    <Link
-                      to="/licencias/otras-estadisticas"
-                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                        isActive('/licencias/otras-estadisticas')
-                          ? 'bg-[#016098] text-white'
-                          : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                      }`}
-                    >
-                      Otras Estadisticas
-                    </Link>
-                  </li>
-                </ul>
+                <div className="ml-4 pl-3 border-l border-white/20 space-y-1 mt-1 text-xs">
+                  <Link
+                    to="/licencias/estadisticas"
+                    className={`block py-2 px-3 rounded-md transition-colors ${
+                      isActive('/licencias/estadisticas')
+                        ? 'bg-[#39BABD] text-white font-bold'
+                        : 'text-blue-100 hover:bg-white/10'
+                    }`}
+                  >
+                    Estadística Recupero
+                  </Link>
+                  <Link
+                    to="/licencias/otras-estadisticas"
+                    className={`block py-2 px-3 rounded-md transition-colors ${
+                      isActive('/licencias/otras-estadisticas')
+                        ? 'bg-[#39BABD] text-white font-bold'
+                        : 'text-blue-100 hover:bg-white/10'
+                    }`}
+                  >
+                    Otras Estadísticas
+                  </Link>
+                </div>
               )}
-            </li>
+            </div>
 
             {/* Pago Directo */}
-            <li className="pt-2">
+            <div className="pt-1">
               <button
                 onClick={() => setMenuPagoDirectoOpen(!menuPagoDirectoOpen)}
-                className={`flex justify-between items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                  menuPagoDirectoOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                }`}
+                className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg text-white/90 hover:bg-white/10 transition-colors font-semibold text-left"
               >
-                <span>Licencias Medicas P. Dir.</span>
-                <span className="text-xs">{menuPagoDirectoOpen ? '▼' : '▶'}</span>
+                <span className="flex items-center gap-2.5">
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                    />
+                  </svg>
+                  <span>Licencias Médicas P. Dir.</span>
+                </span>
+                <svg
+                  className={`w-3.5 h-3.5 transition-transform ${menuPagoDirectoOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
               </button>
+
               {menuPagoDirectoOpen && (
-                <ul className="mt-1 space-y-1 pl-4">
-                  <li>
-                    <Link
-                      to="/pago-directo/estadisticas"
-                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                        isActive('/pago-directo/estadisticas')
-                          ? 'bg-[#016098] text-white'
-                          : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                      }`}
-                    >
-                      Estadisticas
-                    </Link>
-                  </li>
-                </ul>
+                <div className="ml-4 pl-3 border-l border-white/20 space-y-1 mt-1 text-xs">
+                  <Link
+                    to="/pago-directo/estadisticas"
+                    className={`block py-2 px-3 rounded-md transition-colors ${
+                      isActive('/pago-directo/estadisticas')
+                        ? 'bg-[#39BABD] text-white font-bold'
+                        : 'text-blue-100 hover:bg-white/10'
+                    }`}
+                  >
+                    Estadísticas
+                  </Link>
+                </div>
               )}
-            </li>
+            </div>
 
             {/* Orden de Reposo */}
-            <li className="pt-2">
+            <div className="pt-1">
               <button
                 onClick={() => setMenuReposoOpen(!menuReposoOpen)}
-                className={`flex justify-between items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                  menuReposoOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                }`}
+                className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg text-white/90 hover:bg-white/10 transition-colors font-semibold text-left"
               >
-                <span>Orden de Reposo</span>
-                <span className="text-xs">{menuReposoOpen ? '▼' : '▶'}</span>
+                <span className="flex items-center gap-2.5">
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                    />
+                  </svg>
+                  <span>Orden de Reposo</span>
+                </span>
+                <svg
+                  className={`w-3.5 h-3.5 transition-transform ${menuReposoOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
               </button>
+
               {menuReposoOpen && (
-                <ul className="mt-1 space-y-1 pl-4">
-                  <li>
-                    <Link
-                      to="/reposo/estadisticas"
-                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                        isActive('/reposo/estadisticas')
-                          ? 'bg-[#016098] text-white'
-                          : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                      }`}
-                    >
-                      Estadistica Recupero
-                    </Link>
-                  </li>
-                  <li>
-                    <Link
-                      to="/reposo/otras-estadisticas"
-                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                        isActive('/reposo/otras-estadisticas')
-                          ? 'bg-[#016098] text-white'
-                          : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                      }`}
-                    >
-                      Otras Estadisticas
-                    </Link>
-                  </li>
+                <div className="ml-4 pl-3 border-l border-white/20 space-y-1 mt-1 text-xs">
+                  <Link
+                    to="/reposo/estadisticas"
+                    className={`block py-2 px-3 rounded-md transition-colors ${
+                      isActive('/reposo/estadisticas')
+                        ? 'bg-[#39BABD] text-white font-bold'
+                        : 'text-blue-100 hover:bg-white/10'
+                    }`}
+                  >
+                    Estadística Recupero
+                  </Link>
+                  <Link
+                    to="/reposo/otras-estadisticas"
+                    className={`block py-2 px-3 rounded-md transition-colors ${
+                      isActive('/reposo/otras-estadisticas')
+                        ? 'bg-[#39BABD] text-white font-bold'
+                        : 'text-blue-100 hover:bg-white/10'
+                    }`}
+                  >
+                    Otras Estadísticas
+                  </Link>
                   {puedeCargarReposo && (
                     <>
-                      <li>
-                        <Link
-                          to="/reposo/carga"
-                          className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                            isActive('/reposo/carga')
-                              ? 'bg-[#016098] text-white'
-                              : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                          }`}
-                        >
-                          Procesar Archivos
-                        </Link>
-                      </li>
-                      <li>
-                        <Link
-                          to="/reposo/auditoria"
-                          className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                            isActive('/reposo/auditoria')
-                              ? 'bg-[#016098] text-white'
-                              : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                          }`}
-                        >
-                          Auditoría de Cargas
-                        </Link>
-                      </li>
+                      <Link
+                        to="/reposo/carga"
+                        className={`block py-2 px-3 rounded-md transition-colors ${
+                          isActive('/reposo/carga')
+                            ? 'bg-[#39BABD] text-white font-bold'
+                            : 'text-blue-100 hover:bg-white/10'
+                        }`}
+                      >
+                        Procesar Archivos
+                      </Link>
+                      <Link
+                        to="/reposo/auditoria"
+                        className={`block py-2 px-3 rounded-md transition-colors ${
+                          isActive('/reposo/auditoria')
+                            ? 'bg-[#39BABD] text-white font-bold'
+                            : 'text-blue-100 hover:bg-white/10'
+                        }`}
+                      >
+                        Auditoría de Cargas
+                      </Link>
                     </>
                   )}
-                </ul>
+                </div>
               )}
-            </li>
+            </div>
 
             {/* Info Gestión */}
-            <li className="pt-2">
+            <div className="pt-1">
               <button
                 onClick={() => setMenuInfoGestionOpen(!menuInfoGestionOpen)}
-                className={`flex justify-between items-center w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                  menuInfoGestionOpen ? 'text-[#016098]' : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                }`}
+                className="w-full flex items-center justify-between py-2.5 px-3 rounded-lg text-white/90 hover:bg-white/10 transition-colors font-semibold text-left"
               >
-                <span>Info. Gestión</span>
-                <span className="text-xs">{menuInfoGestionOpen ? '▼' : '▶'}</span>
+                <span className="flex items-center gap-2.5">
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+                    />
+                  </svg>
+                  <span>Info. Gestión</span>
+                </span>
+                <svg
+                  className={`w-3.5 h-3.5 transition-transform ${menuInfoGestionOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
               </button>
-              {menuInfoGestionOpen && (
-                <ul className="mt-1 space-y-1 pl-4">
-                  <li>
-                    <Link
-                      to="/info-gestion/funcionarios"
-                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                        isActive('/info-gestion/funcionarios')
-                          ? 'bg-[#016098] text-white'
-                          : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                      }`}
-                    >
-                      Licencia Funcionarios
-                    </Link>
-                  </li>
-                  <li>
-                    <Link
-                      to="/info-gestion/rechazadas"
-                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                        isActive('/info-gestion/rechazadas')
-                          ? 'bg-[#016098] text-white'
-                          : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                      }`}
-                    >
-                      Gestión Pago Rechazadas
-                    </Link>
-                  </li>
-                  <li>
-                    <Link
-                      to="/info-gestion/sin-resolucion"
-                      className={`block px-4 py-2.5 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                        isActive('/info-gestion/sin-resolucion')
-                          ? 'bg-[#016098] text-white'
-                          : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                      }`}
-                    >
-                      Gestión Pago Sin Resolución
-                    </Link>
-                  </li>
-                </ul>
-              )}
-            </li>
-          </ul>
-        </nav>
 
-        <div className="p-4 border-t border-[#e2e8f0]">
+              {menuInfoGestionOpen && (
+                <div className="ml-4 pl-3 border-l border-white/20 space-y-1 mt-1 text-xs">
+                  <Link
+                    to="/info-gestion/funcionarios"
+                    className={`block py-2 px-3 rounded-md transition-colors ${
+                      isActive('/info-gestion/funcionarios')
+                        ? 'bg-[#39BABD] text-white font-bold'
+                        : 'text-blue-100 hover:bg-white/10'
+                    }`}
+                  >
+                    Licencia Funcionarios
+                  </Link>
+                  <Link
+                    to="/info-gestion/rechazadas"
+                    className={`block py-2 px-3 rounded-md transition-colors ${
+                      isActive('/info-gestion/rechazadas')
+                        ? 'bg-[#39BABD] text-white font-bold'
+                        : 'text-blue-100 hover:bg-white/10'
+                    }`}
+                  >
+                    Gestión Pago Rechazadas
+                  </Link>
+                  <Link
+                    to="/info-gestion/sin-resolucion"
+                    className={`block py-2 px-3 rounded-md transition-colors ${
+                      isActive('/info-gestion/sin-resolucion')
+                        ? 'bg-[#39BABD] text-white font-bold'
+                        : 'text-blue-100 hover:bg-white/10'
+                    }`}
+                  >
+                    Gestión Pago Sin Resolución
+                  </Link>
+                </div>
+              )}
+            </div>
+          </nav>
+        </div>
+
+        {/* Botón Cerrar Sesión */}
+        <div className="p-4 border-t border-white/15">
           <button
             onClick={handleLogout}
-            className="w-full bg-white border border-[#EB567F] text-[#EB567F] hover:bg-[#EB567F] hover:text-white py-2.5 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm"
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-[#EB567F] hover:bg-[#d6416a] text-white text-xs font-bold shadow transition-colors cursor-pointer"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -596,7 +716,7 @@ export default function Layout() {
                 strokeLinejoin="round"
                 strokeWidth="2"
                 d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-              ></path>
+              />
             </svg>
             Cerrar Sesión
           </button>
@@ -605,7 +725,7 @@ export default function Layout() {
 
       {/* Contenedor Principal Derecho */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden print:h-auto print:overflow-visible">
-        <div className="flex-1 overflow-auto p-4 md:p-8 print:p-0 print:overflow-visible">
+        <div className="flex-1 overflow-auto p-5 md:p-7 print:p-0 print:overflow-visible">
           <Outlet />
         </div>
       </div>
