@@ -217,7 +217,7 @@ export default function CertificadosNominas({ tabInicial = 'certificado' }: Cert
               tabActiva === 'certificado' ? 'bg-[#016098] text-white shadow-sm' : 'text-[#475569] hover:text-[#016098]'
             }`}
           >
-            1. Certificado Base Cálculo Licencia
+            Certificado Base Cálculo Licencia
           </button>
           <button
             onClick={() => setTabActiva('nomina-normal')}
@@ -227,7 +227,7 @@ export default function CertificadosNominas({ tabInicial = 'certificado' }: Cert
                 : 'text-[#475569] hover:text-[#016098]'
             }`}
           >
-            2. Nómina Correspondencia
+            Nómina Correspondencia
           </button>
           <button
             onClick={() => setTabActiva('nomina-pago-directo')}
@@ -237,7 +237,7 @@ export default function CertificadosNominas({ tabInicial = 'certificado' }: Cert
                 : 'text-[#475569] hover:text-[#016098]'
             }`}
           >
-            3. Nómina Corresp. Pago Directo
+            Nómina Corresp. Pago Directo
           </button>
         </div>
       </div>

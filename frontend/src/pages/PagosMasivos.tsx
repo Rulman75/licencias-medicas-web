@@ -509,7 +509,7 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
                 : 'text-[#475569] hover:text-[#016098]'
             }`}
           >
-            1. Importar Pagos Masivos
+            Importar Pagos Masivos
           </button>
           <button
             onClick={() => setTabActiva('auditar')}
@@ -519,7 +519,7 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
                 : 'text-[#475569] hover:text-[#016098]'
             }`}
           >
-            2. Auditar Pagos Masivos
+            Auditar Pagos Masivos
           </button>
           <button
             onClick={() => setTabActiva('eliminar')}
@@ -529,7 +529,7 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
                 : 'text-[#475569] hover:text-[#EB567F]'
             }`}
           >
-            3. Eliminar Pago Masivo
+            Eliminar Pago Masivo
           </button>
         </div>
       </div>

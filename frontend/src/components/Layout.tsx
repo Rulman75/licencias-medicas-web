@@ -159,7 +159,7 @@ export default function Layout() {
                           : 'text-blue-100 hover:bg-white/10'
                       }`}
                     >
-                      1. Ingreso Licencias Médicas
+                      Ingreso Licencias Médicas
                     </Link>
                     <Link
                       to="/mantencion/pagos"
@@ -169,7 +169,7 @@ export default function Layout() {
                           : 'text-blue-100 hover:bg-white/10'
                       }`}
                     >
-                      2. Ingreso Pagos y Cheques
+                      Ingreso Pagos y Cheques
                     </Link>
                   </div>
                 )}
@@ -214,7 +214,7 @@ export default function Layout() {
                           : 'text-blue-100 hover:bg-white/10'
                       }`}
                     >
-                      1. Importar Pagos Masivos
+                      Importar Pagos Masivos
                     </Link>
                     <Link
                       to="/pagos-masivos/auditar"
@@ -224,7 +224,7 @@ export default function Layout() {
                           : 'text-blue-100 hover:bg-white/10'
                       }`}
                     >
-                      2. Auditar Pagos Masivos
+                      Auditar Pagos Masivos
                     </Link>
                     <Link
                       to="/pagos-masivos/eliminar"
@@ -234,7 +234,7 @@ export default function Layout() {
                           : 'text-blue-100 hover:bg-white/10'
                       }`}
                     >
-                      3. Eliminar Pago Masivo
+                      Eliminar Pago Masivo
                     </Link>
                   </div>
                 )}
@@ -324,7 +324,7 @@ export default function Layout() {
                           : 'text-blue-100 hover:bg-white/10'
                       }`}
                     >
-                      1. Certificado de Licencia
+                      Certificado de Licencia
                     </Link>
                     {esAdmin && (
                       <>
@@ -336,7 +336,7 @@ export default function Layout() {
                               : 'text-blue-100 hover:bg-white/10'
                           }`}
                         >
-                          2. Nómina Correspondencia
+                          Nómina Correspondencia
                         </Link>
                         <Link
                           to="/certificados/nomina-pago-directo"
@@ -346,7 +346,7 @@ export default function Layout() {
                               : 'text-blue-100 hover:bg-white/10'
                           }`}
                         >
-                          3. Nómina Pago Directo
+                          Nómina Pago Directo
                         </Link>
                       </>
                     )}
@@ -393,7 +393,7 @@ export default function Layout() {
                           : 'text-blue-100 hover:bg-white/10'
                       }`}
                     >
-                      1. Ficha y Deuda Funcionario
+                      Ficha y Deuda Funcionario
                     </Link>
                     {esAdmin && (
                       <Link
@@ -404,7 +404,7 @@ export default function Layout() {
                             : 'text-blue-100 hover:bg-white/10'
                         }`}
                       >
-                        2. Recepción Diaria Licencias
+                        Recepción Diaria Licencias
                       </Link>
                     )}
                     {puedeVerBRP && (
@@ -429,7 +429,7 @@ export default function Layout() {
                               : 'text-blue-100 hover:bg-white/10'
                           }`}
                         >
-                          3. Pago Directo Mensual
+                          Pago Directo Mensual
                         </Link>
                         <Link
                           to="/informes/general-pagos"
@@ -439,7 +439,7 @@ export default function Layout() {
                               : 'text-blue-100 hover:bg-white/10'
                           }`}
                         >
-                          4. Anual Pagadas / Impagas
+                          Anual Pagadas / Impagas
                         </Link>
                         {MOSTRAR_MODULOS_OCULTOS && (
                           <Link

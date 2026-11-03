@@ -241,11 +241,11 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
 
         <div className="flex flex-wrap gap-1.5 bg-[#f1f5f9] p-1.5 rounded-xl">
           {[
-            { id: 'por-funcionario', label: '1. Ficha y Deuda Funcionario', visible: true },
-            { id: 'diarias', label: '2. Recepción Diaria', visible: true },
+            { id: 'por-funcionario', label: 'Ficha y Deuda Funcionario', visible: true },
+            { id: 'diarias', label: 'Recepción Diaria', visible: true },
             { id: 'brp', label: 'Informe BRP', visible: MOSTRAR_MODULOS_OCULTOS },
-            { id: 'pago-directo', label: '3. Pago Directo Mensual', visible: true },
-            { id: 'general-pagos', label: '4. Anual Pagadas / Impagas', visible: true },
+            { id: 'pago-directo', label: 'Pago Directo Mensual', visible: true },
+            { id: 'general-pagos', label: 'Anual Pagadas / Impagas', visible: true },
             { id: 'softland', label: 'Captura Softland', visible: MOSTRAR_MODULOS_OCULTOS }
           ]
             .filter(t => t.visible)
