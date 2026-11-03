@@ -4,11 +4,11 @@ import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [menuMantencionOpen, setMenuMantencionOpen] = useState(true);
+  const [menuMantencionOpen, setMenuMantencionOpen] = useState(false);
   const [menuPagosMasivosOpen, setMenuPagosMasivosOpen] = useState(false);
   const [menuPrevencionOpen, setMenuPrevencionOpen] = useState(false);
-  const [menuCertificadosOpen, setMenuCertificadosOpen] = useState(true);
-  const [menuInformesLegacyOpen, setMenuInformesLegacyOpen] = useState(true);
+  const [menuCertificadosOpen, setMenuCertificadosOpen] = useState(false);
+  const [menuInformesLegacyOpen, setMenuInformesLegacyOpen] = useState(false);
   const [menuLicenciasOpen, setMenuLicenciasOpen] = useState(false);
   const [menuReposoOpen, setMenuReposoOpen] = useState(false);
   const [menuPagoDirectoOpen, setMenuPagoDirectoOpen] = useState(false);
@@ -26,14 +26,6 @@ export default function Layout() {
           unidad: payload.unidad || '',
           tipo: tipoUser
         });
-        if (tipoUser === 'M') {
-          setMenuPrevencionOpen(true);
-        }
-        if (tipoUser === 'G') {
-          setMenuLicenciasOpen(true);
-          setMenuReposoOpen(true);
-          setMenuInfoGestionOpen(true);
-        }
       } catch (e) {
         console.error('Error decoding token');
         navigate('/login');
