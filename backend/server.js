@@ -109,29 +109,214 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/dashboard/inicio-stats', async (req, res) => {
     try {
         const pool = await getConnection();
-        const year = req.query.year;
-        
-        let yearFilter = '';
-        if (year && year !== '') {
-            yearFilter = ` AND YEAR(Desde) = @Year`;
+        const year = req.query.year ? parseInt(req.query.year, 10) : null;
+        const yearFilter = year ? ' AND YEAR(L.Desde) = @Year ' : '';
+
+        const makeReq = () => {
+            const r = pool.request();
+            if (year) r.input('Year', sql.Int, year);
+            return r;
+        };
+
+        // 1. KPIs Generales, Sectoriales y Financieros
+        const pKpis = makeReq().query(`
+            SELECT 
+                COUNT(*) as TotalRegistros,
+                COUNT(DISTINCT L.RutFuncionario) as TotalFuncionarios,
+                SUM(CAST(ISNULL(L.NumDias, 0) AS BIGINT)) as TotalDias,
+                SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP') THEN 1 ELSE 0 END) as Convenio,
+                SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) = 'Pago Directo' THEN 1 ELSE 0 END) as PagoDirecto,
+                SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo,
+                SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 THEN 1 ELSE 0 END) as Rechazadas,
+                SUM(CASE WHEN ISNULL(L.regularizado, 0) = 1 THEN 1 ELSE 0 END) as Reducidas,
+                SUM(CASE WHEN ISNULL(L.Maternal, 0) = 1 THEN 1 ELSE 0 END) as Maternales,
+                SUM(CASE WHEN F.CodUnidad < 600 THEN 1 ELSE 0 END) as SectorEducacion,
+                SUM(CASE WHEN F.CodUnidad >= 600 THEN 1 ELSE 0 END) as SectorSalud,
+                SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as TotalEstimado,
+                SUM(CAST(ISNULL(P.TotalPagado, 0) AS BIGINT)) as TotalPagado,
+                SUM(CASE WHEN ISNULL(P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as LicenciasPagadas,
+                SUM(CASE WHEN ISNULL(P.TotalPagado, 0) = 0 AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasPendientesPago
+            FROM LIC_LICENCIA_ACTUAL L
+            LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
+            LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+            WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' ${yearFilter}
+        `);
+
+        // 2. Estado de Cheques en DETALLE_CHEQUES
+        const pCheques = pool.request().query(`
+            SELECT
+                COUNT(*) as TotalCheques,
+                SUM(CASE WHEN RTRIM(ISNULL(estado, '')) = 'Abierto' THEN 1 ELSE 0 END) as ChequesAbiertos,
+                SUM(CASE WHEN RTRIM(ISNULL(estado, '')) = 'Cerrado' THEN 1 ELSE 0 END) as ChequesCerrados,
+                SUM(CASE WHEN RTRIM(ISNULL(estado, '')) = 'Abierto' THEN CAST(ISNULL(monto, 0) - ISNULL(saldo, 0) AS BIGINT) ELSE 0 END) as SaldoPorCuadrar
+            FROM DETALLE_CHEQUES
+        `);
+
+        // 3. Evolución (Mensual si hay año seleccionado, Anual 2020-Actual si es Histórico)
+        const pEvolucion = year
+            ? makeReq().query(`
+                SELECT
+                    MONTH(L.Desde) as PeriodoNum,
+                    SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP') THEN 1 ELSE 0 END) as Convenio,
+                    SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) = 'Pago Directo' THEN 1 ELSE 0 END) as PagoDirecto,
+                    SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo,
+                    COUNT(*) as Total,
+                    SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as Estimado,
+                    SUM(CAST(ISNULL(P.TotalPagado, 0) AS BIGINT)) as Pagado
+                FROM LIC_LICENCIA_ACTUAL L
+                LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+                WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' AND YEAR(L.Desde) = @Year
+                GROUP BY MONTH(L.Desde)
+                ORDER BY MONTH(L.Desde) ASC
+            `)
+            : pool.request().query(`
+                SELECT
+                    YEAR(L.Desde) as PeriodoNum,
+                    SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP') THEN 1 ELSE 0 END) as Convenio,
+                    SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) = 'Pago Directo' THEN 1 ELSE 0 END) as PagoDirecto,
+                    SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo,
+                    COUNT(*) as Total,
+                    SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as Estimado,
+                    SUM(CAST(ISNULL(P.TotalPagado, 0) AS BIGINT)) as Pagado
+                FROM LIC_LICENCIA_ACTUAL L
+                LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+                WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula'
+                  AND YEAR(L.Desde) >= 2020 AND YEAR(L.Desde) <= YEAR(GETDATE())
+                GROUP BY YEAR(L.Desde)
+                ORDER BY YEAR(L.Desde) ASC
+            `);
+
+        // 4. Top 8 Instituciones de Salud / Isapres
+        const pTopSalud = makeReq().query(`
+            SELECT TOP 8
+                RTRIM(ISNULL(S.Descripcion, 'SIN INFORMACIÓN')) as Institucion,
+                COUNT(*) as Cantidad,
+                SUM(CAST(ISNULL(L.NumDias, 0) AS BIGINT)) as Dias,
+                SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as Estimado,
+                SUM(CAST(ISNULL(P.TotalPagado, 0) AS BIGINT)) as Pagado
+            FROM LIC_LICENCIA_ACTUAL L
+            INNER JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
+            INNER JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
+            LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+            WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' ${yearFilter}
+            GROUP BY RTRIM(ISNULL(S.Descripcion, 'SIN INFORMACIÓN'))
+            ORDER BY COUNT(*) DESC
+        `);
+
+        // 5. Top 10 Establecimientos / Unidades con mayor volumen de licencias
+        const pTopEstablecimientos = makeReq().query(`
+            SELECT TOP 10
+                F.CodUnidad,
+                RTRIM(ISNULL(E.Descripcion, 'UNIDAD ' + CAST(F.CodUnidad AS VARCHAR))) as Establecimiento,
+                COUNT(*) as Cantidad,
+                COUNT(DISTINCT L.RutFuncionario) as Funcionarios,
+                SUM(CAST(ISNULL(L.NumDias, 0) AS BIGINT)) as Dias
+            FROM LIC_LICENCIA_ACTUAL L
+            INNER JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
+            LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
+            WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula'
+              AND F.CodUnidad IS NOT NULL ${yearFilter}
+            GROUP BY F.CodUnidad, RTRIM(ISNULL(E.Descripcion, 'UNIDAD ' + CAST(F.CodUnidad AS VARCHAR)))
+            ORDER BY COUNT(*) DESC
+        `);
+
+        // 6. Últimas 10 Licencias Recepcionadas
+        const pRecientes = makeReq().query(`
+            SELECT TOP 10
+                RTRIM(L.NumeroLicencia) as NumeroLicencia,
+                RTRIM(L.RutFuncionario) as Rut,
+                RTRIM(ISNULL(F.DV, ISNULL(L.dv, ''))) as DV,
+                RTRIM(ISNULL(F.Nombre, '')) + ' ' + RTRIM(ISNULL(F.Paterno, '')) + ' ' + RTRIM(ISNULL(F.Materno, '')) as Funcionario,
+                ISNULL(F.CodUnidad, 0) as CodUnidad,
+                RTRIM(ISNULL(E.Descripcion, '')) as Establecimiento,
+                RTRIM(ISNULL(S.Descripcion, '')) as Salud,
+                CONVERT(varchar, L.Desde, 23) as Desde,
+                CONVERT(varchar, L.Hasta, 23) as Hasta,
+                CONVERT(varchar, L.Recepcion, 23) as Recepcion,
+                ISNULL(L.NumDias, 0) as NumDias,
+                RTRIM(ISNULL(L.PagoDirecto, 'Normal')) as Modalidad,
+                ISNULL(L.Rechazo, 0) as Rechazo,
+                ISNULL(L.regularizado, 0) as Reducida,
+                ISNULL(L.Maternal, 0) as Maternal,
+                ISNULL(L.PagoEstimado, 0) as PagoEstimado,
+                ISNULL(P.TotalPagado, 0) as TotalPagado
+            FROM LIC_LICENCIA_ACTUAL L
+            LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
+            LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
+            LEFT JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
+            LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+            WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' ${yearFilter}
+            ORDER BY L.Recepcion DESC, L.Desde DESC
+        `);
+
+        const [resKpis, resCheques, resEvolucion, resTopSalud, resTopEst, resRecientes] = await Promise.all([
+            pKpis, pCheques, pEvolucion, pTopSalud, pTopEstablecimientos, pRecientes
+        ]);
+
+        const mesesNombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+        let evolucionFormateada = [];
+        if (year) {
+            const mapaMes = {};
+            for (const row of resEvolucion.recordset) {
+                mapaMes[row.PeriodoNum] = row;
+            }
+            for (let m = 1; m <= 12; m++) {
+                const r = mapaMes[m] || {};
+                evolucionFormateada.push({
+                    periodo: mesesNombres[m - 1],
+                    Convenio: Number(r.Convenio || 0),
+                    PagoDirecto: Number(r.PagoDirecto || 0),
+                    Reposo: Number(r.Reposo || 0),
+                    Total: Number(r.Total || 0),
+                    Estimado: Number(r.Estimado || 0),
+                    Pagado: Number(r.Pagado || 0)
+                });
+            }
+        } else {
+            evolucionFormateada = resEvolucion.recordset.map(r => ({
+                periodo: String(r.PeriodoNum),
+                Convenio: Number(r.Convenio || 0),
+                PagoDirecto: Number(r.PagoDirecto || 0),
+                Reposo: Number(r.Reposo || 0),
+                Total: Number(r.Total || 0),
+                Estimado: Number(r.Estimado || 0),
+                Pagado: Number(r.Pagado || 0)
+            }));
         }
 
-        const query = `
-            SELECT 
-                SUM(CASE WHEN RTRIM(ISNULL(PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP') THEN 1 ELSE 0 END) as Convenio,
-                SUM(CASE WHEN RTRIM(ISNULL(PagoDirecto, '')) = 'Pago Directo' THEN 1 ELSE 0 END) as PagoDirecto,
-                SUM(CASE WHEN RTRIM(ISNULL(PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo
-            FROM LIC_LICENCIA_ACTUAL
-            WHERE 1=1 ${yearFilter}
-        `;
-        
-        const request = pool.request();
-        if (year && year !== '') {
-            request.input('Year', sql.Int, parseInt(year));
-        }
-        
-        const result = await request.query(query);
-        res.json({ status: 'ok', data: result.recordset[0] });
+        const kpisRow = resKpis.recordset[0] || {};
+        const chequesRow = resCheques.recordset[0] || {};
+
+        res.json({
+            status: 'ok',
+            data: {
+                Convenio: Number(kpisRow.Convenio || 0),
+                PagoDirecto: Number(kpisRow.PagoDirecto || 0),
+                Reposo: Number(kpisRow.Reposo || 0),
+                TotalRegistros: Number(kpisRow.TotalRegistros || 0),
+                TotalFuncionarios: Number(kpisRow.TotalFuncionarios || 0),
+                TotalDias: Number(kpisRow.TotalDias || 0),
+                Rechazadas: Number(kpisRow.Rechazadas || 0),
+                Reducidas: Number(kpisRow.Reducidas || 0),
+                Maternales: Number(kpisRow.Maternales || 0),
+                SectorEducacion: Number(kpisRow.SectorEducacion || 0),
+                SectorSalud: Number(kpisRow.SectorSalud || 0),
+                TotalEstimado: Number(kpisRow.TotalEstimado || 0),
+                TotalPagado: Number(kpisRow.TotalPagado || 0),
+                LicenciasPagadas: Number(kpisRow.LicenciasPagadas || 0),
+                LicenciasPendientesPago: Number(kpisRow.LicenciasPendientesPago || 0),
+                cheques: {
+                    TotalCheques: Number(chequesRow.TotalCheques || 0),
+                    ChequesAbiertos: Number(chequesRow.ChequesAbiertos || 0),
+                    ChequesCerrados: Number(chequesRow.ChequesCerrados || 0),
+                    SaldoPorCuadrar: Number(chequesRow.SaldoPorCuadrar || 0)
+                },
+                evolucion: evolucionFormateada,
+                topSalud: resTopSalud.recordset,
+                topEstablecimientos: resTopEst.recordset,
+                recientes: resRecientes.recordset
+            }
+        });
     } catch (err) {
         console.error('Inicio Stats error:', err);
         res.status(500).json({ status: 'error', message: 'Error obteniendo estadisticas de inicio' });
