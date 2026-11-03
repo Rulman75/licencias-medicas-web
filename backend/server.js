@@ -35,6 +35,36 @@ app.use('/api/reposo', async (req, res, next) => {
     }
 }, require('./routes/reposo'));
 
+// Inject pool for mantencion routes
+app.use('/api/mantencion', async (req, res, next) => {
+    try {
+        req.db = await getConnection();
+        next();
+    } catch (e) {
+        res.status(500).json({ error: 'DB connection error' });
+    }
+}, require('./routes/mantencion'));
+
+// Inject pool for pagos-masivos routes
+app.use('/api/pagos-masivos', async (req, res, next) => {
+    try {
+        req.db = await getConnection();
+        next();
+    } catch (e) {
+        res.status(500).json({ error: 'DB connection error' });
+    }
+}, require('./routes/pagosMasivos'));
+
+// Inject pool for informes routes
+app.use('/api/informes', async (req, res, next) => {
+    try {
+        req.db = await getConnection();
+        next();
+    } catch (e) {
+        res.status(500).json({ error: 'DB connection error' });
+    }
+}, require('./routes/informes'));
+
 const jwt = require('jsonwebtoken');
 
 // Login endpoint
