@@ -58,6 +58,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
   const [cargandoDetalle, setCargandoDetalle] = useState<boolean>(false);
   const [filtroEstadoDet, setFiltroEstadoDet] = useState<'todas' | 'por-cobrar' | 'sin-pago' | 'pagadas' | 'rechazadas'>('todas');
   const [busquedaDet, setBusquedaDet] = useState<string>('');
+  const [ordenCampoDet, setOrdenCampoDet] = useState<'fecha' | 'demora'>('fecha');
   const [ordenFechaDet, setOrdenFechaDet] = useState<'desc' | 'asc'>('desc');
 
   useEffect(() => {
@@ -214,11 +215,25 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
       return true;
     })
     .sort((a, b) => {
+      if (ordenCampoDet === 'demora') {
+        const dA = a.DiasDemoraPago !== null && a.DiasDemoraPago !== undefined ? Number(a.DiasDemoraPago) : -1;
+        const dB = b.DiasDemoraPago !== null && b.DiasDemoraPago !== undefined ? Number(b.DiasDemoraPago) : -1;
+        return ordenFechaDet === 'asc' ? dA - dB : dB - dA;
+      }
       const campo = criterio === 'desde' ? 'Desde' : 'Recepcion';
       const fA = String(a[campo] || '');
       const fB = String(b[campo] || '');
       return ordenFechaDet === 'asc' ? fA.localeCompare(fB) : fB.localeCompare(fA);
     });
+
+  // Promedio de días de demora de pago en el detalle filtrado
+  const pagadasConDemora = registrosDetalleFiltrados.filter(
+    r => r.DiasDemoraPago !== null && r.DiasDemoraPago !== undefined && Number(r.MontoPagado || 0) > 0
+  );
+  const promedioDiasDemora =
+    pagadasConDemora.length > 0
+      ? Math.round(pagadasConDemora.reduce((acc, r) => acc + Number(r.DiasDemoraPago || 0), 0) / pagadasConDemora.length)
+      : null;
 
   // Exportar el detalle de licencias a Excel
   const exportarDetalleExcel = () => {
@@ -240,6 +255,8 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
         'Fecha Recepción': formatDateDDMMYYYY(r.Recepcion),
         'Fecha Desde': formatDateDDMMYYYY(r.Desde),
         'Fecha Hasta': formatDateDDMMYYYY(r.Hasta),
+        'Fecha Pago': r.FechaPago ? formatDateDDMMYYYY(r.FechaPago) : 'SIN PAGO',
+        'Días Demora Pago': r.DiasDemoraPago !== null && r.DiasDemoraPago !== undefined ? r.DiasDemoraPago : '',
         'Días Licencia': r.NumDias,
         'Días Autorizados': r.DiasAutorizados,
         'Días Pag. Subsidio': r.DiasSubsidio,
@@ -612,15 +629,22 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
         <div className="bg-[#f8fafc] rounded-xl border-2 border-[#016098]/30 p-5 space-y-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b border-[#e2e8f0] pb-3">
             <div>
-              <h3 className="text-sm font-bold text-[#016098] uppercase">
-                Detalle de Licencias con Convenio —{' '}
-                {mesDetalle > 0
-                  ? `${mesesData.find(m => m.Mes === mesDetalle)?.MesNombre || ''} ${anio}`
-                  : `Año Completo ${anio}`}{' '}
-                ({registrosDetalleFiltrados.length} registros)
-              </h3>
-              <p className="text-xs text-[#64748b]">
-                Filtre por estado de cobro, busque por RUT/Funcionario/Licencia o exporte la nómina detallada a Excel
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-bold text-[#016098] uppercase">
+                  Detalle de Licencias con Convenio —{' '}
+                  {mesDetalle > 0
+                    ? `${mesesData.find(m => m.Mes === mesDetalle)?.MesNombre || ''} ${anio}`
+                    : `Año Completo ${anio}`}{' '}
+                  ({registrosDetalleFiltrados.length} registros)
+                </h3>
+                {promedioDiasDemora !== null && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-100 text-[#016098]">
+                    Promedio Demora de Pago: {promedioDiasDemora} días
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-[#64748b] mt-0.5">
+                Filtre por estado de cobro, ordene por demora de pago, busque por RUT/Funcionario/Licencia o exporte la nómina detallada a Excel
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -687,10 +711,39 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
               />
               <button
                 type="button"
-                onClick={() => setOrdenFechaDet(prev => (prev === 'desc' ? 'asc' : 'desc'))}
-                className="px-3 py-1.5 bg-white border border-[#cbd5e1] text-[#016098] text-xs font-bold rounded-lg hover:bg-[#f1f5f9]"
+                onClick={() => {
+                  if (ordenCampoDet === 'fecha') {
+                    setOrdenFechaDet(prev => (prev === 'desc' ? 'asc' : 'desc'));
+                  } else {
+                    setOrdenCampoDet('fecha');
+                    setOrdenFechaDet('desc');
+                  }
+                }}
+                className={`px-3 py-1.5 border text-xs font-bold rounded-lg ${
+                  ordenCampoDet === 'fecha'
+                    ? 'bg-[#016098] text-white border-[#016098]'
+                    : 'bg-white border-[#cbd5e1] text-[#016098] hover:bg-[#f1f5f9]'
+                }`}
               >
-                Fecha {ordenFechaDet === 'desc' ? '▼' : '▲'}
+                Fecha {ordenCampoDet === 'fecha' ? (ordenFechaDet === 'desc' ? '▼' : '▲') : ''}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (ordenCampoDet === 'demora') {
+                    setOrdenFechaDet(prev => (prev === 'desc' ? 'asc' : 'desc'));
+                  } else {
+                    setOrdenCampoDet('demora');
+                    setOrdenFechaDet('desc');
+                  }
+                }}
+                className={`px-3 py-1.5 border text-xs font-bold rounded-lg ${
+                  ordenCampoDet === 'demora'
+                    ? 'bg-[#016098] text-white border-[#016098]'
+                    : 'bg-white border-[#cbd5e1] text-[#016098] hover:bg-[#f1f5f9]'
+                }`}
+              >
+                Demora Pago {ordenCampoDet === 'demora' ? (ordenFechaDet === 'desc' ? '▼' : '▲') : ''}
               </button>
             </div>
           </div>
@@ -707,6 +760,8 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                   <th className="p-2.5">Salud</th>
                   <th className="p-2.5">Recepción</th>
                   <th className="p-2.5">Desde</th>
+                  <th className="p-2.5">Fecha Pago</th>
+                  <th className="p-2.5 text-center">Demora Pago</th>
                   <th className="p-2.5 text-center">Días</th>
                   <th className="p-2.5 text-center">Días Sub.</th>
                   <th className="p-2.5 text-center">Días Apo.</th>
@@ -720,13 +775,13 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
               <tbody className="divide-y divide-[#e2e8f0]">
                 {cargandoDetalle ? (
                   <tr>
-                    <td colSpan={15} className="p-6 text-center text-[#64748b]">
+                    <td colSpan={17} className="p-6 text-center text-[#64748b]">
                       Cargando detalle de licencias con convenio...
                     </td>
                   </tr>
                 ) : registrosDetalleFiltrados.length === 0 ? (
                   <tr>
-                    <td colSpan={15} className="p-6 text-center text-[#94a3b8]">
+                    <td colSpan={17} className="p-6 text-center text-[#94a3b8]">
                       No se encontraron licencias para los filtros seleccionados
                     </td>
                   </tr>
@@ -735,6 +790,8 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                     const est = Number(r.PagoEstimado || 0);
                     const pag = Number(r.MontoPagado || 0);
                     const pct = est > 0 ? Math.round((pag / est) * 100) : 0;
+                    const demora =
+                      r.DiasDemoraPago !== null && r.DiasDemoraPago !== undefined ? Number(r.DiasDemoraPago) : null;
                     return (
                       <tr key={r.NumeroLicencia} className="hover:bg-[#f8fafc]">
                         <td className="p-2.5 font-bold text-[#016098]">{r.NumeroLicencia}</td>
@@ -750,6 +807,27 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                         <td className="p-2.5">{r.Salud}</td>
                         <td className="p-2.5 whitespace-nowrap">{formatDateDDMMYYYY(r.Recepcion)}</td>
                         <td className="p-2.5 whitespace-nowrap">{formatDateDDMMYYYY(r.Desde)}</td>
+                        <td className="p-2.5 whitespace-nowrap font-semibold text-emerald-700">
+                          {r.FechaPago ? formatDateDDMMYYYY(r.FechaPago) : <span className="text-slate-400 font-normal">Sin pago</span>}
+                        </td>
+                        <td className="p-2.5 text-center whitespace-nowrap">
+                          {demora !== null ? (
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                demora <= 30
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : demora <= 60
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-rose-100 text-rose-800'
+                              }`}
+                              title="Días transcurridos entre Fecha de Recepción de la licencia y Fecha de Pago"
+                            >
+                              {demora} días
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
                         <td className="p-2.5 text-center">{r.NumDias}</td>
                         <td className="p-2.5 text-center font-semibold text-sky-800">{r.DiasSubsidio}</td>
                         <td className="p-2.5 text-center font-semibold text-indigo-700">{r.DiasAporte}</td>

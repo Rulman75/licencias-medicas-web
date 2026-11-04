@@ -539,6 +539,7 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                 CONVERT(varchar, L.Recepcion, 23) as Recepcion,
                 CONVERT(varchar, L.Desde, 23) as Desde,
                 CONVERT(varchar, L.Hasta, 23) as Hasta,
+                CONVERT(varchar, DP.FechaPagoRaw, 23) as FechaPago,
                 COALESCE(L.NumDias, 0) as NumDias,
                 COALESCE(L.DiasAutorizados, 0) as DiasAutorizados,
                 COALESCE(DP.DiasSubsidio, P.NumDiasPagados, 0) as DiasSubsidio,
@@ -572,6 +573,7 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasAporte,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
+                    MAX(COALESCE(FechaDepCtaCte, recepcion)) as FechaPagoRaw,
                     COUNT(*) as CantPagos
                 FROM LIC_DETALLE_PAGO_ACTUAL
                 GROUP BY RTRIM(CAST(NumeroLicencia AS VARCHAR(50)))
@@ -582,9 +584,27 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
             ORDER BY ${criterio} DESC, L.NumeroLicencia DESC
         `);
 
+        const registros = detRes.recordset.map(r => {
+            let diasDemoraPago = null;
+            const fechaPagoStr = r.FechaPago || null;
+            const fechaBaseStr = r.Recepcion || r.Desde || null;
+            if (fechaPagoStr && fechaBaseStr && Number(r.MontoPagado || 0) > 0) {
+                const dPago = new Date(`${String(fechaPagoStr).slice(0, 10)}T00:00:00`);
+                const dBase = new Date(`${String(fechaBaseStr).slice(0, 10)}T00:00:00`);
+                if (!isNaN(dPago.getTime()) && !isNaN(dBase.getTime())) {
+                    diasDemoraPago = Math.max(0, Math.round((dPago.getTime() - dBase.getTime()) / (1000 * 60 * 60 * 24)));
+                }
+            }
+            return {
+                ...r,
+                FechaPago: fechaPagoStr,
+                DiasDemoraPago: diasDemoraPago
+            };
+        });
+
         res.json({
             status: 'ok',
-            registros: detRes.recordset
+            registros
         });
     } catch (err) {
         console.error('Error en GET /api/dashboard/convenio-mensual/detalle:', err);
