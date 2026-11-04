@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import * as htmlToImage from 'html-to-image';
+import ControlConvenioMensual from './ControlConvenioMensual';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
   LineChart, Line, CartesianGrid, PieChart, Pie, Cell
@@ -108,6 +109,12 @@ export default function OtrasEstadisticas({ modulo, titulo }: OtrasEstadisticasP
           </div>
         </div>
       </div>
+
+      {modulo === 'licencias' && (
+        <div className="mb-8">
+          <ControlConvenioMensual initialYear={year} />
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center p-12">

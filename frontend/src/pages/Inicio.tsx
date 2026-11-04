@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
+import ControlConvenioMensual from '../components/ControlConvenioMensual';
 import {
   PieChart,
   Pie,
@@ -451,6 +452,9 @@ export default function Inicio() {
                 </p>
               </div>
             </div>
+
+            {/* BLOQUE 2.5: Control Mensual de Licencias con Convenio Tramitadas y Recuperación de Subsidios */}
+            <ControlConvenioMensual initialYear={year || String(new Date().getFullYear())} />
 
             {/* BLOQUE 3: Gráficos de Evolución y Distribución */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

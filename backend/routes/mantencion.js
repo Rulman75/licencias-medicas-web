@@ -193,6 +193,7 @@ router.get('/funcionario/:rut', async (req, res) => {
                     RTRIM(ISNULL(L.Autorizada, '')) as Autorizada,
                     RTRIM(ISNULL(L.Observacion, '')) as Observacion,
                     RTRIM(ISNULL(L.Obser_apelacion, '')) as Obser_apelacion,
+                    RTRIM(ISNULL(L.Observacion_Compin, '')) as Observacion_Compin,
                     RTRIM(ISNULL(L.Observacion_CajaLA, '')) as Observacion_CajaLA,
                     RTRIM(ISNULL(L.observ_mutual, '')) as ObservMutual,
                     CASE WHEN ISNULL(DP.CantPagos, 0) > 0 THEN ISNULL(DP.SumaDias, 0) ELSE ISNULL(P.NumDiasPagados, 0) END as NumDiasPagados,
@@ -487,6 +488,7 @@ router.get('/licencia/:numero', async (req, res) => {
                     RTRIM(ISNULL(Observacion, '')) as Observacion,
                     RTRIM(ISNULL(Observacion_CajaLA, '')) as Observacion_CajaLA,
                     RTRIM(ISNULL(Obser_apelacion, '')) as Obser_apelacion,
+                    RTRIM(ISNULL(Observacion_Compin, '')) as Observacion_Compin,
                     RTRIM(ISNULL(observ_mutual, '')) as ObservMutual,
                     RTRIM(ISNULL(RutMedico, '')) as RutMedico,
                     RTRIM(ISNULL(nombreMedico, '')) as NombreMedico,
@@ -657,6 +659,7 @@ router.post('/licencia', async (req, res) => {
         reqLic.input('Compin', sql.NChar, b.compin ? 'True' : 'False');
         reqLic.input('Autorizada', sql.NChar, b.autorizada ? 'True' : 'False');
         reqLic.input('ObserApelacion', sql.NVarChar, String(b.obserApelacion || ''));
+        reqLic.input('ObservacionCompin', sql.NVarChar, String(b.observacionCompin || ''));
         reqLic.input('Direccion', sql.NChar, String(b.direccion || ''));
         reqLic.input('Telefono', sql.NChar, String(b.telefono || ''));
         reqLic.input('TipoLic', sql.NChar, String(b.tipoLic || ''));
@@ -671,7 +674,7 @@ router.post('/licencia', async (req, res) => {
                     Maternal, Recepcion, Remision, Rechazo, Parcial, Observacion,
                     MontoNetoPromedio, SubsidioDiario, PagoEstimado, RutMedico, nombreMedico,
                     regularizado, dv, PagoDirecto, Descuento, MontoDesc, Tipo_enferm,
-                    Apelacion, Suseso, Compin, Autorizada, Obser_apelacion,
+                    Apelacion, Suseso, Compin, Autorizada, Obser_apelacion, Observacion_Compin,
                     Direccion, telefono, TipoLic, Usuario, FechaHora,
                     Retenida, JornadaParcial, Pendiente, altaAchs, Observacion_CajaLA, observ_mutual
                 ) VALUES (
@@ -679,7 +682,7 @@ router.post('/licencia', async (req, res) => {
                     @Maternal, @Recepcion, @Remision, @Rechazo, @Parcial, @Observacion,
                     @MontoNetoPromedio, @SubsidioDiario, @PagoEstimado, @RutMedico, @NombreMedico,
                     @Regularizado, @DV, @PagoDirecto, @Descuento, @MontoDesc, @TipoEnferm,
-                    @Apelacion, @Suseso, @Compin, @Autorizada, @ObserApelacion,
+                    @Apelacion, @Suseso, @Compin, @Autorizada, @ObserApelacion, @ObservacionCompin,
                     @Direccion, @Telefono, @TipoLic, @Usuario, CONVERT(varchar, GETDATE(), 20),
                     @Retenida, @JornadaParcial, @Pendiente, @AltaAchs, @ObservacionCajaLA, @ObservMutual
                 )
@@ -729,6 +732,7 @@ router.post('/licencia', async (req, res) => {
                     Autorizada = @Autorizada,
                     Pendiente = @Pendiente,
                     Obser_apelacion = @ObserApelacion,
+                    Observacion_Compin = @ObservacionCompin,
                     Direccion = @Direccion,
                     telefono = @Telefono,
                     TipoLic = @TipoLic,

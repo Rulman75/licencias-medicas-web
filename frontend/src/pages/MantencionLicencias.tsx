@@ -118,6 +118,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
   const [observacion, setObservacion] = useState('');
   const [observacionCajaLA, setObservacionCajaLA] = useState('');
   const [obserApelacion, setObserApelacion] = useState('');
+  const [observacionCompin, setObservacionCompin] = useState('');
   const [observMutual, setObservMutual] = useState('');
 
   // Correos
@@ -272,6 +273,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
         setObservacion(l.Observacion || '');
         setObservacionCajaLA(l.Observacion_CajaLA || '');
         setObserApelacion(l.Obser_apelacion || '');
+        setObservacionCompin(l.Observacion_Compin || '');
         setObservMutual(l.ObservMutual || '');
 
         if (l.RutFuncionario) {
@@ -483,6 +485,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
         compin,
         autorizada,
         obserApelacion,
+        observacionCompin,
         direccion: funcionario?.Direccion || '',
         telefono: funcionario?.Telefono || '',
         tipoLic,
@@ -656,6 +659,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
     setObservacion('');
     setObservacionCajaLA('');
     setObserApelacion('');
+    setObservacionCompin('');
     setObservMutual('');
   };
 
@@ -701,6 +705,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
       'Retenida': l.Retenida ? 'SI' : 'NO',
       'Observación': l.Observacion,
       'Obs. Apelación': l.Obser_apelacion,
+      'Observación Compin': l.Observacion_Compin || '',
       'Obs. Mutual': l.ObservMutual
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -1230,6 +1235,18 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
                 placeholder="Detalle resolución, motivo rechazo o apelación..."
               />
             </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold text-[#016098] mb-1">
+                Observación Compin (`Observacion_Compin`)
+              </label>
+              <textarea
+                rows={2}
+                value={observacionCompin}
+                onChange={e => setObservacionCompin(e.target.value)}
+                className="w-full px-3 py-2 text-xs border border-[#cbd5e1] rounded-lg bg-sky-50/40 focus:bg-white"
+                placeholder="Pronunciamiento / Observación COMPIN (ej. COMPIN: Confirmada Autorizada Con Derecho Subsidio)..."
+              />
+            </div>
             <div>
               <label className="block text-xs font-semibold text-[#475569] mb-1">Observación Caja Los Andes</label>
               <input
@@ -1563,12 +1580,13 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
                 <th className="p-2.5 text-right">Total Pagado</th>
                 <th className="p-2.5 text-center">Estado</th>
                 <th className="p-2.5">Observación / Apelación</th>
+                <th className="p-2.5">Observación Compin</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#e2e8f0]">
               {historialLicencias.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="p-6 text-center text-[#94a3b8]">
+                  <td colSpan={14} className="p-6 text-center text-[#94a3b8]">
                     Busque un funcionario por RUT para visualizar su historial de licencias médicas
                   </td>
                 </tr>
@@ -1620,8 +1638,11 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
                           </span>
                         )}
                       </td>
-                      <td className="p-2.5 truncate max-w-[220px]" title={lic.Obser_apelacion || lic.Observacion}>
+                      <td className="p-2.5 truncate max-w-[200px]" title={lic.Obser_apelacion || lic.Observacion}>
                         {lic.Obser_apelacion || lic.Observacion || lic.ObservMutual || '-'}
+                      </td>
+                      <td className="p-2.5 truncate max-w-[220px] text-[#016098] font-medium" title={lic.Observacion_Compin}>
+                        {lic.Observacion_Compin || '-'}
                       </td>
                     </tr>
                   );

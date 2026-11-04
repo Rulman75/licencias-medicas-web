@@ -118,6 +118,16 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
             return r;
         };
 
+        const dpJoin = `
+            LEFT JOIN (
+                SELECT 
+                    RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) as NumeroLicencia,
+                    SUM(COALESCE(Monto, 0)) as SumaMonto
+                FROM LIC_DETALLE_PAGO_ACTUAL
+                GROUP BY RTRIM(CAST(NumeroLicencia AS VARCHAR(50)))
+            ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
+        `;
+
         // 1. KPIs Generales, Sectoriales y Financieros
         const pKpis = makeReq().query(`
             SELECT 
@@ -133,12 +143,13 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                 SUM(CASE WHEN F.CodUnidad < 600 THEN 1 ELSE 0 END) as SectorEducacion,
                 SUM(CASE WHEN F.CodUnidad >= 600 THEN 1 ELSE 0 END) as SectorSalud,
                 SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as TotalEstimado,
-                SUM(CAST(ISNULL(P.TotalPagado, 0) AS BIGINT)) as TotalPagado,
-                SUM(CASE WHEN ISNULL(P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as LicenciasPagadas,
-                SUM(CASE WHEN ISNULL(P.TotalPagado, 0) = 0 AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasPendientesPago
+                SUM(CAST(COALESCE(DP.SumaMonto, P.TotalPagado, 0) AS BIGINT)) as TotalPagado,
+                SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as LicenciasPagadas,
+                SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasPendientesPago
             FROM LIC_LICENCIA_ACTUAL L
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+            ${dpJoin}
             WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' ${yearFilter}
         `);
 
@@ -162,9 +173,10 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                     SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo,
                     COUNT(*) as Total,
                     SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as Estimado,
-                    SUM(CAST(ISNULL(P.TotalPagado, 0) AS BIGINT)) as Pagado
+                    SUM(CAST(COALESCE(DP.SumaMonto, P.TotalPagado, 0) AS BIGINT)) as Pagado
                 FROM LIC_LICENCIA_ACTUAL L
                 LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+                ${dpJoin}
                 WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' AND YEAR(L.Desde) = @Year
                 GROUP BY MONTH(L.Desde)
                 ORDER BY MONTH(L.Desde) ASC
@@ -177,9 +189,10 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                     SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo,
                     COUNT(*) as Total,
                     SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as Estimado,
-                    SUM(CAST(ISNULL(P.TotalPagado, 0) AS BIGINT)) as Pagado
+                    SUM(CAST(COALESCE(DP.SumaMonto, P.TotalPagado, 0) AS BIGINT)) as Pagado
                 FROM LIC_LICENCIA_ACTUAL L
                 LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+                ${dpJoin}
                 WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula'
                   AND YEAR(L.Desde) >= 2020 AND YEAR(L.Desde) <= YEAR(GETDATE())
                 GROUP BY YEAR(L.Desde)
@@ -193,11 +206,12 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                 COUNT(*) as Cantidad,
                 SUM(CAST(ISNULL(L.NumDias, 0) AS BIGINT)) as Dias,
                 SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as Estimado,
-                SUM(CAST(ISNULL(P.TotalPagado, 0) AS BIGINT)) as Pagado
+                SUM(CAST(COALESCE(DP.SumaMonto, P.TotalPagado, 0) AS BIGINT)) as Pagado
             FROM LIC_LICENCIA_ACTUAL L
             INNER JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             INNER JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
             LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+            ${dpJoin}
             WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' ${yearFilter}
             GROUP BY RTRIM(ISNULL(S.Descripcion, 'SIN INFORMACIÓN'))
             ORDER BY COUNT(*) DESC
@@ -239,12 +253,13 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                 ISNULL(L.regularizado, 0) as Reducida,
                 ISNULL(L.Maternal, 0) as Maternal,
                 ISNULL(L.PagoEstimado, 0) as PagoEstimado,
-                ISNULL(P.TotalPagado, 0) as TotalPagado
+                COALESCE(DP.SumaMonto, P.TotalPagado, 0) as TotalPagado
             FROM LIC_LICENCIA_ACTUAL L
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
             LEFT JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
             LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+            ${dpJoin}
             WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' ${yearFilter}
             ORDER BY L.Recepcion DESC, L.Desde DESC
         `);
@@ -320,6 +335,260 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
     } catch (err) {
         console.error('Inicio Stats error:', err);
         res.status(500).json({ status: 'error', message: 'Error obteniendo estadisticas de inicio' });
+    }
+});
+
+// Dashboard Control Mensual de Licencias con Convenio (Pago Estimado, Recibido, Falta por Cobrar, % Pago y Detalle)
+app.get('/api/dashboard/convenio-mensual', async (req, res) => {
+    try {
+        const pool = await getConnection();
+        const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+        const criterio = req.query.criterio === 'desde' ? 'L.Desde' : 'L.Recepcion';
+        const sector = String(req.query.sector || '').toLowerCase();
+
+        let sectorFilter = '';
+        if (sector === 'educacion') sectorFilter = ' AND F.CodUnidad < 600 ';
+        else if (sector === 'salud') sectorFilter = ' AND F.CodUnidad >= 600 ';
+
+        const result = await pool.request()
+            .input('Year', sql.Int, year)
+            .query(`
+                SELECT
+                    MONTH(${criterio}) as Mes,
+                    COUNT(*) as TotalLicencias,
+                    COUNT(DISTINCT L.RutFuncionario) as TotalFuncionarios,
+                    SUM(COALESCE(L.NumDias, 0)) as TotalDias,
+                    SUM(COALESCE(L.DiasAutorizados, 0)) as TotalDiasAut,
+                    SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as LicenciasPagadas,
+                    SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasSinPago,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 THEN 1 ELSE 0 END) as LicenciasRechazadas,
+                    SUM(CASE WHEN ISNULL(L.regularizado, 0) = 1 THEN 1 ELSE 0 END) as LicenciasReducidas,
+                    SUM(COALESCE(DP.DiasSubsidio, P.NumDiasPagados, 0)) as DiasSubsidio,
+                    SUM(COALESCE(DP.DiasAporte, 0)) as DiasAporte,
+                    SUM(CAST(COALESCE(L.PagoEstimado, 0) AS BIGINT)) as TotalEstimado,
+                    SUM(CAST(COALESCE(DP.SumaMonto, P.TotalPagado, 0) AS BIGINT)) as TotalPagado,
+                    SUM(CAST(COALESCE(DP.MontoSubsidio, P.TotalPagado, 0) AS BIGINT)) as PagadoSubsidio,
+                    SUM(CAST(COALESCE(DP.MontoAporte, 0) AS BIGINT)) as PagadoAporte,
+                    SUM(CAST(
+                        CASE 
+                            WHEN COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND ISNULL(L.Rechazo, 0) = 0
+                            THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                            ELSE 0
+                        END AS BIGINT
+                    )) as FaltaPorCobrar,
+                    SUM(CAST(
+                        CASE
+                            WHEN ISNULL(L.Rechazo, 0) = 1 THEN COALESCE(L.PagoEstimado, 0)
+                            ELSE 0
+                        END AS BIGINT
+                    )) as MontoRechazado
+                FROM LIC_LICENCIA_ACTUAL L
+                LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
+                LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+                LEFT JOIN (
+                    SELECT
+                        RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) as NumeroLicencia,
+                        SUM(COALESCE(Monto, 0)) as SumaMonto,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoAporte,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasAporte,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
+                        COUNT(*) as CantPagos
+                    FROM LIC_DETALLE_PAGO_ACTUAL
+                    GROUP BY RTRIM(CAST(NumeroLicencia AS VARCHAR(50)))
+                ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
+                WHERE RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP')
+                  AND YEAR(${criterio}) = @Year
+                  ${sectorFilter}
+                GROUP BY MONTH(${criterio})
+                ORDER BY MONTH(${criterio}) ASC
+            `);
+
+        const mesesNombres = [
+            'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+        ];
+        const mesesCortos = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+        const mapaMes = {};
+        for (const r of result.recordset) {
+            mapaMes[r.Mes] = r;
+        }
+
+        const meses = [];
+        const totales = {
+            TotalLicencias: 0,
+            TotalFuncionarios: 0,
+            TotalDias: 0,
+            TotalDiasAut: 0,
+            LicenciasPagadas: 0,
+            LicenciasSinPago: 0,
+            LicenciasRechazadas: 0,
+            LicenciasReducidas: 0,
+            DiasSubsidio: 0,
+            DiasAporte: 0,
+            TotalEstimado: 0,
+            TotalPagado: 0,
+            PagadoSubsidio: 0,
+            PagadoAporte: 0,
+            FaltaPorCobrar: 0,
+            MontoRechazado: 0
+        };
+
+        for (let m = 1; m <= 12; m++) {
+            const r = mapaMes[m] || {};
+            const est = Number(r.TotalEstimado || 0);
+            const pag = Number(r.TotalPagado || 0);
+            const falta = Number(r.FaltaPorCobrar || 0);
+            const totalLic = Number(r.TotalLicencias || 0);
+            const licPag = Number(r.LicenciasPagadas || 0);
+            const licRech = Number(r.LicenciasRechazadas || 0);
+
+            const rowObj = {
+                Mes: m,
+                MesNombre: mesesNombres[m - 1],
+                MesCorto: mesesCortos[m - 1],
+                TotalLicencias: totalLic,
+                TotalFuncionarios: Number(r.TotalFuncionarios || 0),
+                TotalDias: Number(r.TotalDias || 0),
+                TotalDiasAut: Number(r.TotalDiasAut || 0),
+                LicenciasPagadas: licPag,
+                LicenciasSinPago: Number(r.LicenciasSinPago || 0),
+                LicenciasRechazadas: licRech,
+                LicenciasReducidas: Number(r.LicenciasReducidas || 0),
+                DiasSubsidio: Number(r.DiasSubsidio || 0),
+                DiasAporte: Number(r.DiasAporte || 0),
+                TotalEstimado: est,
+                TotalPagado: pag,
+                PagadoSubsidio: Number(r.PagadoSubsidio || 0),
+                PagadoAporte: Number(r.PagadoAporte || 0),
+                FaltaPorCobrar: falta,
+                MontoRechazado: Number(r.MontoRechazado || 0),
+                PorcentajePago: est > 0 ? Number(((pag / est) * 100).toFixed(1)) : 0,
+                PorcentajeCobertura: totalLic > 0 ? Number(((licPag / totalLic) * 100).toFixed(1)) : 0
+            };
+
+            meses.push(rowObj);
+
+            totales.TotalLicencias += rowObj.TotalLicencias;
+            totales.TotalFuncionarios += rowObj.TotalFuncionarios;
+            totales.TotalDias += rowObj.TotalDias;
+            totales.TotalDiasAut += rowObj.TotalDiasAut;
+            totales.LicenciasPagadas += rowObj.LicenciasPagadas;
+            totales.LicenciasSinPago += rowObj.LicenciasSinPago;
+            totales.LicenciasRechazadas += rowObj.LicenciasRechazadas;
+            totales.LicenciasReducidas += rowObj.LicenciasReducidas;
+            totales.DiasSubsidio += rowObj.DiasSubsidio;
+            totales.DiasAporte += rowObj.DiasAporte;
+            totales.TotalEstimado += rowObj.TotalEstimado;
+            totales.TotalPagado += rowObj.TotalPagado;
+            totales.PagadoSubsidio += rowObj.PagadoSubsidio;
+            totales.PagadoAporte += rowObj.PagadoAporte;
+            totales.FaltaPorCobrar += rowObj.FaltaPorCobrar;
+            totales.MontoRechazado += rowObj.MontoRechazado;
+        }
+
+        totales.PorcentajePago = totales.TotalEstimado > 0
+            ? Number(((totales.TotalPagado / totales.TotalEstimado) * 100).toFixed(1))
+            : 0;
+        totales.PorcentajeCobertura = totales.TotalLicencias > 0
+            ? Number(((totales.LicenciasPagadas / totales.TotalLicencias) * 100).toFixed(1))
+            : 0;
+
+        res.json({
+            status: 'ok',
+            year,
+            criterio: req.query.criterio === 'desde' ? 'desde' : 'recepcion',
+            meses,
+            totales
+        });
+    } catch (err) {
+        console.error('Error en GET /api/dashboard/convenio-mensual:', err);
+        res.status(500).json({ status: 'error', message: 'Error obteniendo control mensual de convenio' });
+    }
+});
+
+// Detalle de Licencias con Convenio de un Mes / Año para revisión y exportación a Excel
+app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
+    try {
+        const pool = await getConnection();
+        const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+        const month = req.query.month ? parseInt(req.query.month, 10) : 0;
+        const criterio = req.query.criterio === 'desde' ? 'L.Desde' : 'L.Recepcion';
+        const sector = String(req.query.sector || '').toLowerCase();
+
+        const reqDb = pool.request().input('Year', sql.Int, year);
+        let extraWhere = '';
+        if (month >= 1 && month <= 12) {
+            reqDb.input('Month', sql.Int, month);
+            extraWhere += ` AND MONTH(${criterio}) = @Month `;
+        }
+        if (sector === 'educacion') extraWhere += ' AND F.CodUnidad < 600 ';
+        else if (sector === 'salud') extraWhere += ' AND F.CodUnidad >= 600 ';
+
+        const detRes = await reqDb.query(`
+            SELECT
+                RTRIM(L.NumeroLicencia) as NumeroLicencia,
+                RTRIM(L.RutFuncionario) as Rut,
+                RTRIM(ISNULL(F.DV, ISNULL(L.dv, ''))) as DV,
+                RTRIM(ISNULL(F.Nombre, '')) + ' ' + RTRIM(ISNULL(F.Paterno, '')) + ' ' + RTRIM(ISNULL(F.Materno, '')) as Funcionario,
+                CASE WHEN COALESCE(F.CodUnidad, 0) < 600 THEN 'Educación' ELSE 'Salud' END as Sector,
+                COALESCE(F.CodUnidad, 0) as CodUnidad,
+                RTRIM(ISNULL(E.Descripcion, '')) as Establecimiento,
+                RTRIM(ISNULL(S.Descripcion, '')) as Salud,
+                CONVERT(varchar, L.Recepcion, 23) as Recepcion,
+                CONVERT(varchar, L.Desde, 23) as Desde,
+                CONVERT(varchar, L.Hasta, 23) as Hasta,
+                COALESCE(L.NumDias, 0) as NumDias,
+                COALESCE(L.DiasAutorizados, 0) as DiasAutorizados,
+                COALESCE(DP.DiasSubsidio, P.NumDiasPagados, 0) as DiasSubsidio,
+                COALESCE(DP.DiasAporte, 0) as DiasAporte,
+                COALESCE(L.PagoEstimado, 0) as PagoEstimado,
+                COALESCE(DP.SumaMonto, P.TotalPagado, 0) as MontoPagado,
+                COALESCE(DP.MontoSubsidio, P.TotalPagado, 0) as PagadoSubsidio,
+                COALESCE(DP.MontoAporte, 0) as PagadoAporte,
+                CASE 
+                    WHEN COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND ISNULL(L.Rechazo, 0) = 0
+                    THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                    ELSE 0
+                END as FaltaPorCobrar,
+                COALESCE(DP.CantPagos, 0) as CantidadPagos,
+                ISNULL(L.Rechazo, 0) as Rechazo,
+                ISNULL(L.regularizado, 0) as Reducida,
+                RTRIM(ISNULL(L.Autorizada, '')) as Autorizada,
+                RTRIM(ISNULL(L.Observacion_Compin, '')) as Observacion_Compin,
+                RTRIM(ISNULL(L.Obser_apelacion, '')) as Obser_apelacion,
+                RTRIM(ISNULL(L.Observacion, '')) as Observacion
+            FROM LIC_LICENCIA_ACTUAL L
+            LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
+            LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
+            LEFT JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
+            LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+            LEFT JOIN (
+                SELECT
+                    RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) as NumeroLicencia,
+                    SUM(COALESCE(Monto, 0)) as SumaMonto,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoAporte,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasAporte,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
+                    COUNT(*) as CantPagos
+                FROM LIC_DETALLE_PAGO_ACTUAL
+                GROUP BY RTRIM(CAST(NumeroLicencia AS VARCHAR(50)))
+            ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
+            WHERE RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP')
+              AND YEAR(${criterio}) = @Year
+              ${extraWhere}
+            ORDER BY ${criterio} DESC, L.NumeroLicencia DESC
+        `);
+
+        res.json({
+            status: 'ok',
+            registros: detRes.recordset
+        });
+    } catch (err) {
+        console.error('Error en GET /api/dashboard/convenio-mensual/detalle:', err);
+        res.status(500).json({ status: 'error', message: 'Error obteniendo detalle mensual de convenio' });
     }
 });
 
