@@ -199,32 +199,93 @@ router.get('/por-funcionario', async (req, res) => {
         const pool = req.db;
         const rut = cleanRut(req.query.rut);
         const paterno = String(req.query.paterno || '').trim();
+        const desde = String(req.query.desde || '').trim();
+        const hasta = String(req.query.hasta || '').trim();
 
         // Si busca por apellido paterno, devolver lista de coincidencias
         if (!rut && paterno) {
-            const listRes = await pool.request()
-                .input('Pat', sql.NVarChar, `%${paterno}%`)
-                .query(`
-                    SELECT TOP 50
-                        RTRIM(F.Rut) as Rut,
-                        RTRIM(ISNULL(F.DV, '')) as DV,
-                        RTRIM(ISNULL(F.Nombre, '')) as Nombre,
-                        RTRIM(ISNULL(F.Paterno, '')) as Paterno,
-                        RTRIM(ISNULL(F.Materno, '')) as Materno,
-                        ISNULL(F.CodUnidad, 0) as CodUnidad,
-                        RTRIM(ISNULL(E.Descripcion, '')) as Establecimiento,
-                        RTRIM(ISNULL(F.descripcionPlanta, '')) as Planta,
-                        RTRIM(ISNULL(F.vigencia, '')) as Vigencia
-                    FROM LIC_FUNCIONARIO F
-                    LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
-                    WHERE F.Paterno LIKE @Pat
-                    ORDER BY F.Paterno ASC, F.Materno ASC, F.Nombre ASC
-                `);
+            const listReq = pool.request().input('Pat', sql.NVarChar, `%${paterno}%`);
+            let whereExtra = '';
+            if (desde) {
+                listReq.input('Desde', sql.Date, desde);
+                whereExtra += ` AND EXISTS (SELECT 1 FROM LIC_LICENCIA_ACTUAL L WHERE RTRIM(L.RutFuncionario) = RTRIM(F.Rut) AND L.Desde >= @Desde${hasta ? ' AND L.Desde <= @Hasta' : ''})`;
+            }
+            if (hasta) {
+                listReq.input('Hasta', sql.Date, hasta);
+                if (!desde) {
+                    whereExtra += ` AND EXISTS (SELECT 1 FROM LIC_LICENCIA_ACTUAL L WHERE RTRIM(L.RutFuncionario) = RTRIM(F.Rut) AND L.Desde <= @Hasta)`;
+                }
+            }
+            const listRes = await listReq.query(`
+                SELECT TOP 50
+                    RTRIM(F.Rut) as Rut,
+                    RTRIM(ISNULL(F.DV, '')) as DV,
+                    RTRIM(ISNULL(F.Nombre, '')) as Nombre,
+                    RTRIM(ISNULL(F.Paterno, '')) as Paterno,
+                    RTRIM(ISNULL(F.Materno, '')) as Materno,
+                    ISNULL(F.CodUnidad, 0) as CodUnidad,
+                    RTRIM(ISNULL(E.Descripcion, '')) as Establecimiento,
+                    RTRIM(ISNULL(F.descripcionPlanta, '')) as Planta,
+                    RTRIM(ISNULL(F.vigencia, '')) as Vigencia
+                FROM LIC_FUNCIONARIO F
+                LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
+                WHERE F.Paterno LIKE @Pat ${whereExtra}
+                ORDER BY F.Paterno ASC, F.Materno ASC, F.Nombre ASC
+            `);
             return res.json({ status: 'ok', modo: 'lista', funcionarios: listRes.recordset });
         }
 
+        // Si busca únicamente por rango de fechas (Desde / Hasta) sin RUT ni Apellido
+        if (!rut && (desde || hasta)) {
+            const rangoReq = pool.request();
+            let rangoWhere = 'WHERE 1=1';
+            if (desde) {
+                rangoReq.input('Desde', sql.Date, desde);
+                rangoWhere += ' AND L.Desde >= @Desde';
+            }
+            if (hasta) {
+                rangoReq.input('Hasta', sql.Date, hasta);
+                rangoWhere += ' AND L.Desde <= @Hasta';
+            }
+            const rangoRes = await rangoReq.query(`
+                SELECT TOP 1000
+                    RTRIM(L.NumeroLicencia) as NumeroLicencia,
+                    RTRIM(L.RutFuncionario) as Rut,
+                    RTRIM(ISNULL(F.DV, ISNULL(L.dv, ''))) as DV,
+                    RTRIM(ISNULL(F.Nombre, '')) + ' ' + RTRIM(ISNULL(F.Paterno, '')) + ' ' + RTRIM(ISNULL(F.Materno, '')) as NombreCompleto,
+                    ISNULL(F.CodUnidad, 0) as CodUnidad,
+                    RTRIM(ISNULL(E.Descripcion, '')) as Establecimiento,
+                    CONVERT(varchar, L.Desde, 23) as Desde,
+                    CONVERT(varchar, L.Hasta, 23) as Hasta,
+                    ISNULL(L.NumDias, 0) as NumDias,
+                    ISNULL(L.DiasAutorizados, 0) as DiasAutorizados,
+                    ISNULL(L.Rechazo, 0) as Rechazo,
+                    RTRIM(ISNULL(L.Observacion, '')) as Observacion,
+                    RTRIM(ISNULL(L.Obser_apelacion, '')) as ObserApelacion,
+                    RTRIM(ISNULL(L.PagoDirecto, '')) as PagoDirecto,
+                    RTRIM(ISNULL(L.Tipo_enferm, '')) as TipoEnferm,
+                    ISNULL(L.PagoEstimado, 0) as PagoEstimado,
+                    ISNULL(P.TotalPagado, 0) as TotalPagadoTabla,
+                    ISNULL(DP.SumaMonto, 0) as MontoPagadoDetalle
+                FROM LIC_LICENCIA_ACTUAL L
+                LEFT JOIN LIC_FUNCIONARIO F ON RTRIM(L.RutFuncionario) = RTRIM(F.Rut)
+                LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
+                LEFT JOIN LIC_PAGO_ACTUAL P ON RTRIM(L.NumeroLicencia) = RTRIM(P.NumeroLicencia)
+                LEFT JOIN (
+                    SELECT 
+                        RTRIM(CONVERT(varchar(50), NumeroLicencia)) as NumeroLicencia,
+                        SUM(ISNULL(Monto, 0)) as SumaMonto
+                    FROM LIC_DETALLE_PAGO_ACTUAL
+                    GROUP BY RTRIM(CONVERT(varchar(50), NumeroLicencia))
+                ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
+                ${rangoWhere}
+                ORDER BY L.Desde DESC
+            `);
+            return res.json({ status: 'ok', modo: 'rango', licenciasRango: rangoRes.recordset });
+        }
+
         if (!rut) {
-            return res.status(400).json({ error: 'Ingrese un RUT o Apellido Paterno para consultar' });
+            return res.status(400).json({ error: 'Ingrese un RUT, Apellido Paterno o Rango de Fechas (Desde/Hasta) para consultar' });
         }
 
         // Datos del funcionario
@@ -248,10 +309,18 @@ router.get('/por-funcionario', async (req, res) => {
                 WHERE F.Rut = @Rut
             `);
 
-        // Licencias del funcionario (LicenciasPorFuncionarioTableAdapter)
-        const licRes = await pool.request()
-            .input('Rut', sql.NVarChar, rut)
-            .query(`
+        // Licencias del funcionario (LicenciasPorFuncionarioTableAdapter) con filtro opcional de rango Desde/Hasta
+        const licReq = pool.request().input('Rut', sql.NVarChar, rut);
+        let licDateFilter = '';
+        if (desde) {
+            licReq.input('Desde', sql.Date, desde);
+            licDateFilter += ' AND L.Desde >= @Desde';
+        }
+        if (hasta) {
+            licReq.input('Hasta', sql.Date, hasta);
+            licDateFilter += ' AND L.Desde <= @Hasta';
+        }
+        const licRes = await licReq.query(`
                 SELECT
                     RTRIM(L.NumeroLicencia) as NumeroLicencia,
                     CONVERT(varchar, L.Desde, 23) as Desde,
@@ -278,7 +347,7 @@ router.get('/por-funcionario', async (req, res) => {
                     FROM LIC_DETALLE_PAGO_ACTUAL
                     GROUP BY RTRIM(CONVERT(varchar(50), NumeroLicencia))
                 ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
-                WHERE RTRIM(L.RutFuncionario) = @Rut
+                WHERE RTRIM(L.RutFuncionario) = @Rut ${licDateFilter}
                 ORDER BY L.Desde DESC
             `);
 

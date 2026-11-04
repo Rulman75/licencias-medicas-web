@@ -23,7 +23,10 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
   // --- TAB 1: POR FUNCIONARIO Y DEUDA / NO PAGADAS ---
   const [rutFunc, setRutFunc] = useState('');
   const [paternoFunc, setPaternoFunc] = useState('');
+  const [desdeFunc, setDesdeFunc] = useState('');
+  const [hastaFunc, setHastaFunc] = useState('');
   const [listaCoincidencias, setListaCoincidencias] = useState<any[]>([]);
+  const [licenciasRango, setLicenciasRango] = useState<any[]>([]);
   const [fichaFuncionario, setFichaFuncionario] = useState<any | null>(null);
   const [licenciasFunc, setLicenciasFunc] = useState<any[]>([]);
   const [ordenDesdeFunc, setOrdenDesdeFunc] = useState<'desc' | 'asc'>('desc');
@@ -69,12 +72,15 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
     return clean;
   };
 
-  // 1. Buscar por Funcionario (RUT o Apellido Paterno)
-  const buscarPorFuncionario = async (rutDirecto?: string) => {
+  // 1. Buscar por Funcionario (RUT, Apellido Paterno y/o Rango de Fechas Desde/Hasta)
+  const buscarPorFuncionario = async (rutDirecto?: string, desdeOverride?: string, hastaOverride?: string) => {
     const r = (rutDirecto !== undefined ? rutDirecto : rutFunc).trim();
     const p = paternoFunc.trim();
-    if (!r && !p) {
-      setMensaje({ tipo: 'error', texto: 'Ingrese un RUT o Apellido Paterno para consultar' });
+    const d = (desdeOverride !== undefined ? desdeOverride : desdeFunc).trim();
+    const h = (hastaOverride !== undefined ? hastaOverride : hastaFunc).trim();
+
+    if (!r && !p && !d && !h) {
+      setMensaje({ tipo: 'error', texto: 'Ingrese un RUT, Apellido Paterno o Rango de Fechas (Desde / Hasta) para consultar' });
       return;
     }
     setCargando(true);
@@ -82,19 +88,30 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
     try {
       const params = new URLSearchParams();
       if (r) params.set('rut', r);
-      else params.set('paterno', p);
+      else if (p) params.set('paterno', p);
+      if (d) params.set('desde', d);
+      if (h) params.set('hasta', h);
 
       const res = await fetch(`/api/informes/por-funcionario?${params.toString()}`);
       const data = await res.json();
       if (res.ok && data.status === 'ok') {
         if (data.modo === 'lista') {
           setListaCoincidencias(data.funcionarios || []);
+          setLicenciasRango([]);
           setFichaFuncionario(null);
           if ((data.funcionarios || []).length === 0) {
-            setMensaje({ tipo: 'info', texto: 'No se encontraron funcionarios con ese apellido' });
+            setMensaje({ tipo: 'info', texto: 'No se encontraron funcionarios con los criterios indicados' });
+          }
+        } else if (data.modo === 'rango') {
+          setListaCoincidencias([]);
+          setFichaFuncionario(null);
+          setLicenciasRango(data.licenciasRango || []);
+          if ((data.licenciasRango || []).length === 0) {
+            setMensaje({ tipo: 'info', texto: 'No se encontraron licencias en el rango de fechas seleccionado' });
           }
         } else {
           setListaCoincidencias([]);
+          setLicenciasRango([]);
           setFichaFuncionario(data.funcionario);
           setLicenciasFunc(data.licencias || []);
           setRentasFunc(data.rentas || []);
@@ -287,10 +304,10 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
       {tabActiva === 'por-funcionario' && (
         <div className="space-y-6">
           <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-5 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-              <div className="md:col-span-4">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+              <div className="md:col-span-3">
                 <label className="block text-xs font-semibold text-[#475569] mb-1">Buscar por RUT Funcionario</label>
-                <div className="flex gap-2">
+                <div className="flex gap-1.5">
                   <input
                     type="text"
                     value={rutFunc}
@@ -302,18 +319,18 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
                   <button
                     onClick={() => buscarPorFuncionario(rutFunc)}
                     disabled={cargando}
-                    className="px-4 py-2 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78] shrink-0"
+                    className="px-3 py-2 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78] shrink-0"
                   >
                     Buscar RUT
                   </button>
                 </div>
               </div>
 
-              <div className="md:col-span-5">
+              <div className="md:col-span-3">
                 <label className="block text-xs font-semibold text-[#475569] mb-1">
-                  O Buscar por Apellido Paterno
+                  O por Apellido Paterno
                 </label>
-                <div className="flex gap-2">
+                <div className="flex gap-1.5">
                   <input
                     type="text"
                     value={paternoFunc}
@@ -333,13 +350,176 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
                       buscarPorFuncionario('');
                     }}
                     disabled={cargando}
-                    className="px-4 py-2 bg-slate-700 text-white text-xs font-bold rounded-lg hover:bg-slate-800 shrink-0"
+                    className="px-3 py-2 bg-slate-700 text-white text-xs font-bold rounded-lg hover:bg-slate-800 shrink-0"
                   >
                     Buscar Apellido
                   </button>
                 </div>
               </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-[#475569] mb-1">
+                  Fecha Desde (Rango)
+                </label>
+                <input
+                  type="date"
+                  value={desdeFunc}
+                  onChange={e => setDesdeFunc(e.target.value)}
+                  className="w-full px-2.5 py-2 text-xs border border-[#cbd5e1] rounded-lg"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-[#475569] mb-1">
+                  Fecha Hasta (Rango)
+                </label>
+                <input
+                  type="date"
+                  value={hastaFunc}
+                  onChange={e => setHastaFunc(e.target.value)}
+                  className="w-full px-2.5 py-2 text-xs border border-[#cbd5e1] rounded-lg"
+                />
+              </div>
+
+              <div className="md:col-span-2 flex gap-1.5">
+                <button
+                  onClick={() => buscarPorFuncionario(fichaFuncionario?.Rut || rutFunc)}
+                  disabled={cargando}
+                  className="flex-1 px-3 py-2 bg-[#39BABD] text-white text-xs font-bold rounded-lg hover:bg-[#2da1a4]"
+                  title="Buscar o filtrar por rango de fechas Desde / Hasta"
+                >
+                  Filtrar Fechas
+                </button>
+                {(desdeFunc || hastaFunc) && (
+                  <button
+                    onClick={() => {
+                      setDesdeFunc('');
+                      setHastaFunc('');
+                      if (fichaFuncionario?.Rut || rutFunc || paternoFunc) {
+                        buscarPorFuncionario(fichaFuncionario?.Rut || rutFunc, '', '');
+                      } else {
+                        setLicenciasRango([]);
+                      }
+                    }}
+                    disabled={cargando}
+                    className="px-2.5 py-2 border border-[#cbd5e1] text-[#475569] text-xs font-semibold rounded-lg hover:bg-[#f1f5f9]"
+                    title="Limpiar filtro de fechas"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Resultado de búsqueda general por Rango de Fechas (cuando no se especificó un RUT único) */}
+            {licenciasRango.length > 0 && !fichaFuncionario && (
+              <div className="space-y-3 pt-3 border-t border-[#f1f5f9]">
+                <div className="flex flex-wrap justify-between items-center gap-2">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-[#016098]">
+                      Licencias Encontradas en el Rango ({licenciasRango.length})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setOrdenDesdeFunc(prev => (prev === 'desc' ? 'asc' : 'desc'))}
+                      className="px-3 py-1 bg-[#f1f5f9] hover:bg-[#e2e8f0] text-[#016098] border border-[#cbd5e1] text-xs font-semibold rounded-lg"
+                    >
+                      Orden Desde: {ordenDesdeFunc === 'desc' ? 'Más recientes ▼' : 'Más antiguas ▲'}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() =>
+                      exportarGenericoExcel(
+                        [...licenciasRango]
+                          .sort((a, b) =>
+                            ordenDesdeFunc === 'asc'
+                              ? String(a.Desde || '').localeCompare(String(b.Desde || ''))
+                              : String(b.Desde || '').localeCompare(String(a.Desde || ''))
+                          )
+                          .map(l => ({
+                            'RUT': `${l.Rut}-${l.DV}`,
+                            'Funcionario': (l.NombreCompleto || '').trim(),
+                            'Establecimiento': `${l.CodUnidad} - ${l.Establecimiento}`,
+                            'N° Licencia': l.NumeroLicencia,
+                            'Desde': formatDateDDMMYYYY(l.Desde),
+                            'Hasta': formatDateDDMMYYYY(l.Hasta),
+                            'Días Lic.': l.NumDias,
+                            'Días Aut.': l.DiasAutorizados,
+                            'Modalidad': l.PagoDirecto,
+                            'Tipo Enferm.': l.TipoEnferm,
+                            'Pago Estimado ($)': l.PagoEstimado,
+                            'Monto Pagado ($)': l.MontoPagadoDetalle || l.TotalPagadoTabla,
+                            'Rechazo': l.Rechazo ? 'SI' : 'NO',
+                            'Observación': l.Observacion,
+                            'Obs. Apelación': l.ObserApelacion
+                          })),
+                        `Licencias_Funcionarios_Rango_${desdeFunc || 'Inicio'}_a_${hastaFunc || 'Fin'}`
+                      )
+                    }
+                    className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                  >
+                    Exportar Rango a Excel
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[420px]">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#f1f5f9] text-[#475569] sticky top-0">
+                      <tr>
+                        <th className="p-2.5">RUT</th>
+                        <th className="p-2.5">Funcionario</th>
+                        <th className="p-2.5">N° Licencia</th>
+                        <th
+                          onClick={() => setOrdenDesdeFunc(prev => (prev === 'desc' ? 'asc' : 'desc'))}
+                          className="p-2.5 cursor-pointer select-none hover:bg-[#e2e8f0] text-[#016098]"
+                        >
+                          Desde {ordenDesdeFunc === 'desc' ? '▼' : '▲'}
+                        </th>
+                        <th className="p-2.5">Hasta</th>
+                        <th className="p-2.5 text-center">Días</th>
+                        <th className="p-2.5">Modalidad</th>
+                        <th className="p-2.5 text-right">Pago Estimado</th>
+                        <th className="p-2.5 text-right">Monto Pagado</th>
+                        <th className="p-2.5 text-center">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#e2e8f0]">
+                      {[...licenciasRango]
+                        .sort((a, b) =>
+                          ordenDesdeFunc === 'asc'
+                            ? String(a.Desde || '').localeCompare(String(b.Desde || ''))
+                            : String(b.Desde || '').localeCompare(String(a.Desde || ''))
+                        )
+                        .map(l => (
+                          <tr key={`${l.NumeroLicencia}-${l.Rut}`} className="hover:bg-[#f8fafc]">
+                            <td className="p-2.5 font-bold text-[#016098]">
+                              {l.Rut}-{l.DV}
+                            </td>
+                            <td className="p-2.5 font-semibold">{(l.NombreCompleto || '').trim()}</td>
+                            <td className="p-2.5 font-semibold">{l.NumeroLicencia}</td>
+                            <td className="p-2.5">{formatDateDDMMYYYY(l.Desde)}</td>
+                            <td className="p-2.5">{formatDateDDMMYYYY(l.Hasta)}</td>
+                            <td className="p-2.5 text-center">{l.NumDias}</td>
+                            <td className="p-2.5">{l.PagoDirecto}</td>
+                            <td className="p-2.5 text-right">${Number(l.PagoEstimado || 0).toLocaleString('es-CL')}</td>
+                            <td className="p-2.5 text-right font-bold text-emerald-700">
+                              ${Number(l.MontoPagadoDetalle || l.TotalPagadoTabla || 0).toLocaleString('es-CL')}
+                            </td>
+                            <td className="p-2.5 text-center">
+                              <button
+                                onClick={() => buscarPorFuncionario(l.Rut)}
+                                className="px-2.5 py-1 bg-[#016098] text-white rounded text-[11px] font-bold"
+                              >
+                                Ver Ficha
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* Coincidencias por Apellido */}
             {listaCoincidencias.length > 0 && (
