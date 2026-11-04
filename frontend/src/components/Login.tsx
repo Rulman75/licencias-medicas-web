@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { VERSION_DISPLAY, VERSION_TOOLTIP } from '../version';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -73,10 +74,18 @@ export default function Login() {
             <p className="text-xs text-blue-200 mt-2">
               Mantención Operativa, Subsidios, Pagos Masivos e Informes de Gestión
             </p>
+            <div className="mt-4">
+              <span
+                title={VERSION_TOOLTIP}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/15 text-blue-50 border border-white/20 shadow-sm tracking-wide"
+              >
+                Versión {VERSION_DISPLAY}
+              </span>
+            </div>
           </div>
 
-          <div className="z-10 text-xs text-blue-200">
-            &copy; {new Date().getFullYear()} CMDS Antofagasta. Todos los derechos reservados.
+          <div className="z-10 text-xs text-blue-200 space-y-1">
+            <div>&copy; {new Date().getFullYear()} CMDS Antofagasta. Todos los derechos reservados.</div>
           </div>
         </div>
 

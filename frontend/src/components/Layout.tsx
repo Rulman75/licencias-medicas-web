@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
+import { VERSION_DISPLAY, VERSION_TOOLTIP } from '../version';
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -81,6 +82,12 @@ export default function Layout() {
             <p className="text-[0.72rem] text-blue-200 mt-0.5">
               Gestión, Subsidios y Control CMDS
             </p>
+            <span
+              title={VERSION_TOOLTIP}
+              className="mt-1.5 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-white/10 text-blue-100 border border-white/15 tracking-wider"
+            >
+              Versión {VERSION_DISPLAY}
+            </span>
 
             {userData.username && (
               <div className="mt-3 bg-[#024a8d] px-3 py-1.5 rounded-full text-xs font-medium text-blue-100 flex items-center gap-1.5 border border-white/10 shadow-inner">
