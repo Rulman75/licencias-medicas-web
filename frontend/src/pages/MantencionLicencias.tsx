@@ -692,7 +692,8 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
       'Tipo Enferm.': l.Tipo_enferm,
       'Tipo Lic.': l.TipoLic,
       'Pago Estimado': l.PagoEstimado,
-      'Días Pagados': l.NumDiasPagados,
+      'Días Pag. Subsidio': l.DiasPagadosSubsidio ?? 0,
+      'Días Pag. Aporte': l.DiasPagadosAporte ?? 0,
       'Días por Cobrar': l.DiasCobrar,
       'Cant. Pagos': l.CantidadPagos || 0,
       'Total Pagado ($)': l.TotalPagado,
@@ -1557,7 +1558,8 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
                 <th className="p-2.5">Modalidad</th>
                 <th className="p-2.5">Tipo Enferm.</th>
                 <th className="p-2.5 text-right">Pago Estimado</th>
-                <th className="p-2.5 text-center">Días Pag.</th>
+                <th className="p-2.5 text-center" title="Días pagados por concepto de Subsidio">Días Subsidio</th>
+                <th className="p-2.5 text-center" title="Días pagados por concepto de Aporte">Días Aporte</th>
                 <th className="p-2.5 text-right">Total Pagado</th>
                 <th className="p-2.5 text-center">Estado</th>
                 <th className="p-2.5">Observación / Apelación</th>
@@ -1566,7 +1568,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
             <tbody className="divide-y divide-[#e2e8f0]">
               {historialLicencias.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="p-6 text-center text-[#94a3b8]">
+                  <td colSpan={13} className="p-6 text-center text-[#94a3b8]">
                     Busque un funcionario por RUT para visualizar su historial de licencias médicas
                   </td>
                 </tr>
@@ -1589,7 +1591,8 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
                       <td className="p-2.5">{lic.PagoDirecto}</td>
                       <td className="p-2.5">{lic.Tipo_enferm}</td>
                       <td className="p-2.5 text-right">${Number(lic.PagoEstimado || 0).toLocaleString('es-CL')}</td>
-                      <td className="p-2.5 text-center">{lic.NumDiasPagados}</td>
+                      <td className="p-2.5 text-center font-semibold text-sky-800">{lic.DiasPagadosSubsidio ?? 0}</td>
+                      <td className="p-2.5 text-center font-semibold text-indigo-700">{lic.DiasPagadosAporte ?? 0}</td>
                       <td className="p-2.5 text-right font-semibold text-emerald-700">
                         <div>${Number(lic.TotalPagado || 0).toLocaleString('es-CL')}</div>
                         {Number(lic.CantidadPagos || 0) > 0 && (

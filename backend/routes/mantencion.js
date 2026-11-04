@@ -196,6 +196,8 @@ router.get('/funcionario/:rut', async (req, res) => {
                     RTRIM(ISNULL(L.Observacion_CajaLA, '')) as Observacion_CajaLA,
                     RTRIM(ISNULL(L.observ_mutual, '')) as ObservMutual,
                     CASE WHEN ISNULL(DP.CantPagos, 0) > 0 THEN ISNULL(DP.SumaDias, 0) ELSE ISNULL(P.NumDiasPagados, 0) END as NumDiasPagados,
+                    CASE WHEN ISNULL(DP.CantPagos, 0) > 0 THEN ISNULL(DP.DiasSubsidio, 0) ELSE ISNULL(P.NumDiasPagados, 0) END as DiasPagadosSubsidio,
+                    ISNULL(DP.DiasAporte, 0) as DiasPagadosAporte,
                     ISNULL(P.DiasCobrar, 0) as DiasCobrar,
                     CASE WHEN ISNULL(DP.CantPagos, 0) > 0 THEN ISNULL(DP.SumaMonto, 0) ELSE ISNULL(P.TotalPagado, 0) END as TotalPagado,
                     ISNULL(DP.SumaMonto, 0) as TotalDetallePagado,
@@ -207,6 +209,8 @@ router.get('/funcionario/:rut', async (req, res) => {
                         CONVERT(varchar(50), NumeroLicencia) as NumeroLicencia,
                         SUM(ISNULL(Monto, 0)) as SumaMonto,
                         SUM(ISNULL(DiasPagados, 0)) as SumaDias,
+                        SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) = 'Aporte' THEN ISNULL(DiasPagados, 0) ELSE 0 END) as DiasAporte,
+                        SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) <> 'Aporte' THEN ISNULL(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
                         COUNT(*) as CantPagos
                     FROM LIC_DETALLE_PAGO_ACTUAL
                     GROUP BY CONVERT(varchar(50), NumeroLicencia)
