@@ -385,7 +385,7 @@ export default function Layout() {
                           : 'text-blue-100 hover:bg-white/10'
                       }`}
                     >
-                      Ficha y Deuda Funcionario
+                      Licencias por Funcionario
                     </Link>
                     {esAdmin && (
                       <Link

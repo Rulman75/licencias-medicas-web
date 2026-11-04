@@ -70,6 +70,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
 
   // Historial y Rentas
   const [historialLicencias, setHistorialLicencias] = useState<any[]>([]);
+  const [ordenDesde, setOrdenDesde] = useState<'desc' | 'asc'>('desc');
   const [detallePagosLic, setDetallePagosLic] = useState<any[]>([]);
   const [rentas3Meses, setRentas3Meses] = useState<RentaRow[]>([]);
   const [fechaConcesion, setFechaConcesion] = useState(todayStr);
@@ -670,9 +671,15 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
     setCorreoRechazo('');
   };
 
+  const historialLicenciasOrdenado = [...historialLicencias].sort((a, b) => {
+    const fA = String(a.Desde || '');
+    const fB = String(b.Desde || '');
+    return ordenDesde === 'asc' ? fA.localeCompare(fB) : fB.localeCompare(fA);
+  });
+
   const exportarHistorialExcel = () => {
-    if (historialLicencias.length === 0) return;
-    const rows = historialLicencias.map(l => ({
+    if (historialLicenciasOrdenado.length === 0) return;
+    const rows = historialLicenciasOrdenado.map(l => ({
       'N° Licencia': l.NumeroLicencia,
       'RUT': funcionario ? `${funcionario.Rut}-${funcionario.DV}` : '',
       'Funcionario': funcionario?.NombreCompleto || '',
@@ -1454,12 +1461,25 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
             </p>
           </div>
           {historialLicencias.length > 0 && (
-            <button
-              onClick={exportarHistorialExcel}
-              className="px-3.5 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700 transition-colors"
-            >
-              Exportar Historial a Excel
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setOrdenDesde(prev => (prev === 'desc' ? 'asc' : 'desc'))}
+                className="px-3 py-1.5 bg-[#f1f5f9] hover:bg-[#e2e8f0] text-[#016098] border border-[#cbd5e1] text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5"
+                title="Cambiar orden por Fecha Desde"
+              >
+                <span>Orden Desde:</span>
+                <span className="font-bold">
+                  {ordenDesde === 'desc' ? 'Más recientes primero ▼' : 'Más antiguas primero ▲'}
+                </span>
+              </button>
+              <button
+                onClick={exportarHistorialExcel}
+                className="px-3.5 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700 transition-colors"
+              >
+                Exportar Historial a Excel
+              </button>
+            </div>
           )}
         </div>
 
@@ -1522,7 +1542,15 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
             <thead className="bg-[#f1f5f9] text-[#475569] font-semibold sticky top-0">
               <tr>
                 <th className="p-2.5">N° Licencia</th>
-                <th className="p-2.5">Desde</th>
+                <th
+                  onClick={() => setOrdenDesde(prev => (prev === 'desc' ? 'asc' : 'desc'))}
+                  className="p-2.5 cursor-pointer select-none hover:bg-[#e2e8f0] text-[#016098] transition-colors"
+                  title="Clic para ordenar por Fecha Desde (Ascendente / Descendente)"
+                >
+                  <span className="inline-flex items-center gap-1 font-bold">
+                    Desde {ordenDesde === 'desc' ? '▼' : '▲'}
+                  </span>
+                </th>
                 <th className="p-2.5">Hasta</th>
                 <th className="p-2.5 text-center">Días</th>
                 <th className="p-2.5 text-center">Aut.</th>
@@ -1543,7 +1571,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
                   </td>
                 </tr>
               ) : (
-                historialLicencias.map(lic => {
+                historialLicenciasOrdenado.map(lic => {
                   const seleccionada = lic.NumeroLicencia === numeroLicencia;
                   return (
                     <tr

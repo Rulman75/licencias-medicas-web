@@ -26,6 +26,7 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
   const [listaCoincidencias, setListaCoincidencias] = useState<any[]>([]);
   const [fichaFuncionario, setFichaFuncionario] = useState<any | null>(null);
   const [licenciasFunc, setLicenciasFunc] = useState<any[]>([]);
+  const [ordenDesdeFunc, setOrdenDesdeFunc] = useState<'desc' | 'asc'>('desc');
   const [rentasFunc, setRentasFunc] = useState<any[]>([]);
   const [noPagadasDeuda, setNoPagadasDeuda] = useState<any[]>([]);
   const [subTabFunc, setSubTabFunc] = useState<'licencias' | 'deuda' | 'rentas'>('licencias');
@@ -241,7 +242,7 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
 
         <div className="flex flex-wrap gap-1.5 bg-[#f1f5f9] p-1.5 rounded-xl">
           {[
-            { id: 'por-funcionario', label: 'Ficha y Deuda Funcionario', visible: true },
+            { id: 'por-funcionario', label: 'Licencias por Funcionario (Ficha y Deuda)', visible: true },
             { id: 'diarias', label: 'Recepción Diaria', visible: true },
             { id: 'brp', label: 'Informe BRP', visible: MOSTRAR_MODULOS_OCULTOS },
             { id: 'pago-directo', label: 'Pago Directo Mensual', visible: true },
@@ -431,11 +432,27 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
 
                 {subTabFunc === 'licencias' && (
                   <div className="space-y-3">
-                    <div className="flex justify-end">
+                    <div className="flex justify-between items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setOrdenDesdeFunc(prev => (prev === 'desc' ? 'asc' : 'desc'))}
+                        className="px-3 py-1.5 bg-[#f1f5f9] hover:bg-[#e2e8f0] text-[#016098] border border-[#cbd5e1] text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5"
+                      >
+                        <span>Orden Desde:</span>
+                        <span className="font-bold">
+                          {ordenDesdeFunc === 'desc' ? 'Más recientes primero ▼' : 'Más antiguas primero ▲'}
+                        </span>
+                      </button>
                       <button
                         onClick={() =>
                           exportarGenericoExcel(
-                            licenciasFunc.map(l => ({
+                            [...licenciasFunc]
+                              .sort((a, b) =>
+                                ordenDesdeFunc === 'asc'
+                                  ? String(a.Desde || '').localeCompare(String(b.Desde || ''))
+                                  : String(b.Desde || '').localeCompare(String(a.Desde || ''))
+                              )
+                              .map(l => ({
                               'N° Licencia': l.NumeroLicencia,
                               'Desde': formatDateDDMMYYYY(l.Desde),
                               'Hasta': formatDateDDMMYYYY(l.Hasta),
@@ -462,7 +479,15 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
                         <thead className="bg-[#f1f5f9] text-[#475569] sticky top-0">
                           <tr>
                             <th className="p-2.5">N° Licencia</th>
-                            <th className="p-2.5">Desde</th>
+                            <th
+                              onClick={() => setOrdenDesdeFunc(prev => (prev === 'desc' ? 'asc' : 'desc'))}
+                              className="p-2.5 cursor-pointer select-none hover:bg-[#e2e8f0] text-[#016098] transition-colors"
+                              title="Clic para ordenar por Fecha Desde"
+                            >
+                              <span className="inline-flex items-center gap-1 font-bold">
+                                Desde {ordenDesdeFunc === 'desc' ? '▼' : '▲'}
+                              </span>
+                            </th>
                             <th className="p-2.5">Hasta</th>
                             <th className="p-2.5 text-center">Días</th>
                             <th className="p-2.5 text-center">Aut.</th>
@@ -473,7 +498,13 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#e2e8f0]">
-                          {licenciasFunc.map(l => (
+                          {[...licenciasFunc]
+                            .sort((a, b) =>
+                              ordenDesdeFunc === 'asc'
+                                ? String(a.Desde || '').localeCompare(String(b.Desde || ''))
+                                : String(b.Desde || '').localeCompare(String(a.Desde || ''))
+                            )
+                            .map(l => (
                             <tr key={l.NumeroLicencia} className="hover:bg-[#f8fafc]">
                               <td className="p-2.5 font-bold text-[#016098]">{l.NumeroLicencia}</td>
                               <td className="p-2.5">{formatDateDDMMYYYY(l.Desde)}</td>
