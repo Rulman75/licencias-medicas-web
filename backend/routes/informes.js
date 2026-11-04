@@ -268,15 +268,17 @@ router.get('/por-funcionario', async (req, res) => {
                     ISNULL(L.PagoEstimado, 0) as PagoEstimado,
                     ISNULL(L.MontoDesc, 0) as MontoDesc,
                     ISNULL(P.TotalPagado, 0) as TotalPagadoTabla,
-                    ISNULL(SUM(D.Monto), 0) as MontoPagadoDetalle
+                    ISNULL(DP.SumaMonto, 0) as MontoPagadoDetalle
                 FROM LIC_LICENCIA_ACTUAL L
-                LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
-                LEFT JOIN LIC_DETALLE_PAGO_ACTUAL D ON L.NumeroLicencia = D.NumeroLicencia
-                WHERE L.RutFuncionario = @Rut
-                GROUP BY
-                    L.NumeroLicencia, L.Desde, L.Hasta, L.NumDias, L.DiasAutorizados,
-                    L.Rechazo, L.Parcial, L.regularizado, L.Observacion, L.Obser_apelacion,
-                    L.PagoDirecto, L.Tipo_enferm, L.PagoEstimado, L.MontoDesc, P.TotalPagado
+                LEFT JOIN LIC_PAGO_ACTUAL P ON RTRIM(L.NumeroLicencia) = RTRIM(P.NumeroLicencia)
+                LEFT JOIN (
+                    SELECT 
+                        RTRIM(CONVERT(varchar(50), NumeroLicencia)) as NumeroLicencia,
+                        SUM(ISNULL(Monto, 0)) as SumaMonto
+                    FROM LIC_DETALLE_PAGO_ACTUAL
+                    GROUP BY RTRIM(CONVERT(varchar(50), NumeroLicencia))
+                ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
+                WHERE RTRIM(L.RutFuncionario) = @Rut
                 ORDER BY L.Desde DESC
             `);
 

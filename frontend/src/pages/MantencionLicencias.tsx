@@ -70,6 +70,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
 
   // Historial y Rentas
   const [historialLicencias, setHistorialLicencias] = useState<any[]>([]);
+  const [detallePagosLic, setDetallePagosLic] = useState<any[]>([]);
   const [rentas3Meses, setRentas3Meses] = useState<RentaRow[]>([]);
   const [fechaConcesion, setFechaConcesion] = useState(todayStr);
 
@@ -229,6 +230,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
       const res = await fetch(`/api/mantencion/licencia/${encodeURIComponent(num)}`);
       if (res.status === 404) {
         setLicenciaExiste(false);
+        setDetallePagosLic([]);
         mostrarAlerta('info', `Licencia N° ${num} disponible para nuevo ingreso`);
         return;
       }
@@ -236,6 +238,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
       if (res.ok && data.licencia) {
         const l = data.licencia;
         setLicenciaExiste(true);
+        setDetallePagosLic(data.detallePagos || []);
         setNumeroLicencia(l.NumeroLicencia);
         setDesde(l.Desde || todayStr);
         setHasta(l.Hasta || todayStr);
@@ -620,6 +623,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
   const limpiarFormularioLicencia = () => {
     setNumeroLicencia('');
     setLicenciaExiste(false);
+    setDetallePagosLic([]);
     setDesde(todayStr);
     setHasta(todayStr);
     setNumDias('');
@@ -683,6 +687,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
       'Pago Estimado': l.PagoEstimado,
       'Días Pagados': l.NumDiasPagados,
       'Días por Cobrar': l.DiasCobrar,
+      'Cant. Pagos': l.CantidadPagos || 0,
       'Total Pagado ($)': l.TotalPagado,
       'Rechazada': l.Rechazo ? 'SI' : 'NO',
       'Retenida': l.Retenida ? 'SI' : 'NO',
@@ -1438,14 +1443,14 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
       </div>
 
       {/* SECCIÓN 3: Historial de Licencias del Funcionario */}
-      <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+      <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
             <h2 className="text-sm font-bold text-[#016098] uppercase tracking-wider">
-              5. Historial de Licencias del Funcionario ({historialLicencias.length})
+              5. Historial de Licencias del Funcionario — Detalle de Licencias ({historialLicencias.length})
             </h2>
             <p className="text-xs text-[#64748b]">
-              Haga clic en cualquier fila para cargar la licencia en el formulario superior y editarla
+              Haga clic en cualquier fila para cargar la licencia en el formulario superior, editarla y ver el desglose de sus pagos
             </p>
           </div>
           {historialLicencias.length > 0 && (
@@ -1457,6 +1462,60 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
             </button>
           )}
         </div>
+
+        {/* Desglose de pagos individuales en LIC_DETALLE_PAGO_ACTUAL cuando la licencia seleccionada registra movimientos */}
+        {numeroLicencia && detallePagosLic.length > 0 && (
+          <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-3.5 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-bold text-emerald-900">
+                Pagos Registrados para Licencia N° {numeroLicencia} en <code className="font-mono">LIC_DETALLE_PAGO_ACTUAL</code> ({detallePagosLic.length}{' '}
+                {detallePagosLic.length === 1 ? 'movimiento' : 'movimientos'})
+              </span>
+              <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300">
+                Total Pagado: $
+                {detallePagosLic.reduce((acc, p) => acc + Number(p.Monto || 0), 0).toLocaleString('es-CL')}
+              </span>
+            </div>
+            <div className="overflow-x-auto border border-emerald-200 rounded-lg bg-white">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-emerald-100/70 text-emerald-950 font-semibold">
+                  <tr>
+                    <th className="p-2">N° Documento / Cheque</th>
+                    <th className="p-2">Banco</th>
+                    <th className="p-2">Fecha Depósito</th>
+                    <th className="p-2">Concepto</th>
+                    <th className="p-2 text-center">Días Pag.</th>
+                    <th className="p-2">Desde</th>
+                    <th className="p-2">Hasta</th>
+                    <th className="p-2 text-right">Monto ($)</th>
+                    <th className="p-2">Observación</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-emerald-100">
+                  {detallePagosLic.map(p => (
+                    <tr key={p.Correlativo} className="hover:bg-emerald-50/40">
+                      <td className="p-2 font-semibold text-[#016098]">{p.NumeroDocumento || '-'}</td>
+                      <td className="p-2">{p.Banco || '-'}</td>
+                      <td className="p-2">{formatDateDDMMYYYY(p.FechaDepCtaCte)}</td>
+                      <td className="p-2">
+                        <span className="px-2 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px] font-semibold">
+                          {p.Concepto || 'Subsidio'}
+                        </span>
+                      </td>
+                      <td className="p-2 text-center font-semibold">{p.DiasPagados}</td>
+                      <td className="p-2">{formatDateDDMMYYYY(p.Desde)}</td>
+                      <td className="p-2">{formatDateDDMMYYYY(p.Hasta)}</td>
+                      <td className="p-2 text-right font-bold text-emerald-700">
+                        ${Number(p.Monto || 0).toLocaleString('es-CL')}
+                      </td>
+                      <td className="p-2 text-[#475569]">{p.Observacion || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[380px]">
           <table className="w-full text-left text-xs">
@@ -1504,7 +1563,12 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
                       <td className="p-2.5 text-right">${Number(lic.PagoEstimado || 0).toLocaleString('es-CL')}</td>
                       <td className="p-2.5 text-center">{lic.NumDiasPagados}</td>
                       <td className="p-2.5 text-right font-semibold text-emerald-700">
-                        ${Number(lic.TotalPagado || 0).toLocaleString('es-CL')}
+                        <div>${Number(lic.TotalPagado || 0).toLocaleString('es-CL')}</div>
+                        {Number(lic.CantidadPagos || 0) > 0 && (
+                          <span className="inline-block text-[10px] font-medium px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
+                            {lic.CantidadPagos} {lic.CantidadPagos === 1 ? 'pago' : 'pagos'}
+                          </span>
+                        )}
                       </td>
                       <td className="p-2.5 text-center">
                         {lic.Rechazo ? (

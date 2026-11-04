@@ -165,7 +165,7 @@ router.get('/funcionario/:rut', async (req, res) => {
             }
         }
 
-        // Historial de licencias del funcionario (Grilla_Ingreso_Pagos)
+        // Historial de licencias del funcionario (replica resumenpagosTableAdapter: suma desde LIC_DETALLE_PAGO_ACTUAL)
         const reqLic = await pool.request()
             .input('Rut', sql.NVarChar, rut)
             .query(`
@@ -195,12 +195,22 @@ router.get('/funcionario/:rut', async (req, res) => {
                     RTRIM(ISNULL(L.Obser_apelacion, '')) as Obser_apelacion,
                     RTRIM(ISNULL(L.Observacion_CajaLA, '')) as Observacion_CajaLA,
                     RTRIM(ISNULL(L.observ_mutual, '')) as ObservMutual,
-                    ISNULL(P.NumDiasPagados, 0) as NumDiasPagados,
+                    CASE WHEN ISNULL(DP.CantPagos, 0) > 0 THEN ISNULL(DP.SumaDias, 0) ELSE ISNULL(P.NumDiasPagados, 0) END as NumDiasPagados,
                     ISNULL(P.DiasCobrar, 0) as DiasCobrar,
-                    ISNULL(P.TotalPagado, 0) as TotalPagado,
-                    (SELECT ISNULL(SUM(D.Monto), 0) FROM LIC_DETALLE_PAGO_ACTUAL D WHERE RTRIM(D.NumeroLicencia) = RTRIM(L.NumeroLicencia)) as TotalDetallePagado
+                    CASE WHEN ISNULL(DP.CantPagos, 0) > 0 THEN ISNULL(DP.SumaMonto, 0) ELSE ISNULL(P.TotalPagado, 0) END as TotalPagado,
+                    ISNULL(DP.SumaMonto, 0) as TotalDetallePagado,
+                    ISNULL(DP.CantPagos, 0) as CantidadPagos
                 FROM LIC_LICENCIA_ACTUAL L
-                LEFT JOIN LIC_PAGO_ACTUAL P ON RTRIM(L.NumeroLicencia) = RTRIM(P.NumeroLicencia)
+                LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+                LEFT JOIN (
+                    SELECT 
+                        CONVERT(varchar(50), NumeroLicencia) as NumeroLicencia,
+                        SUM(ISNULL(Monto, 0)) as SumaMonto,
+                        SUM(ISNULL(DiasPagados, 0)) as SumaDias,
+                        COUNT(*) as CantPagos
+                    FROM LIC_DETALLE_PAGO_ACTUAL
+                    GROUP BY CONVERT(varchar(50), NumeroLicencia)
+                ) DP ON L.NumeroLicencia = DP.NumeroLicencia
                 WHERE RTRIM(L.RutFuncionario) = @Rut
                 ORDER BY L.Desde DESC
             `);
@@ -517,7 +527,7 @@ router.get('/licencia/:numero', async (req, res) => {
             .query(`
                 SELECT 
                     Correlativo,
-                    RTRIM(ISNULL(NumeroLicencia, '')) as NumeroLicencia,
+                    RTRIM(ISNULL(CONVERT(varchar(50), NumeroLicencia), '')) as NumeroLicencia,
                     RTRIM(ISNULL(NumeroDocumento, '')) as NumeroDocumento,
                     CONVERT(varchar, FechaDepCtaCte, 23) as FechaDepCtaCte,
                     ISNULL(DiasPagados, 0) as DiasPagados,
@@ -530,7 +540,7 @@ router.get('/licencia/:numero', async (req, res) => {
                     RTRIM(ISNULL(Banco, '')) as Banco,
                     RTRIM(ISNULL(cenco, '')) as Cenco
                 FROM LIC_DETALLE_PAGO_ACTUAL
-                WHERE RTRIM(NumeroLicencia) = @Num
+                WHERE RTRIM(CONVERT(varchar(50), NumeroLicencia)) = @Num
                 ORDER BY Correlativo DESC
             `);
 
@@ -540,27 +550,32 @@ router.get('/licencia/:numero', async (req, res) => {
         let diasAporte = 0;
         let diasSinConcepto = 0;
         let totalMontoDetalle = 0;
+        let totalDiasDetalle = 0;
 
         for (const d of detallePagosRes.recordset) {
             const c = (d.Concepto || '').trim();
-            if (c === 'Subsidio' || c === 'Ampliación Dias') diasSubsidio += Number(d.DiasPagados || 0);
-            else if (c === 'Descuento') diasDescuento += Number(d.DiasPagados || 0);
-            else if (c === 'Aporte') diasAporte += Number(d.DiasPagados || 0);
-            else if (!c) diasSinConcepto += Number(d.DiasPagados || 0);
+            const dp = Number(d.DiasPagados || 0);
+            if (c === 'Subsidio' || c === 'Ampliación Dias') diasSubsidio += dp;
+            else if (c === 'Descuento') diasDescuento += dp;
+            else if (c === 'Aporte') diasAporte += dp;
+            else if (!c) diasSinConcepto += dp;
+            totalDiasDetalle += dp;
             totalMontoDetalle += Number(d.Monto || 0);
         }
 
         const diasCobrarCalc = Number(licencia.NumDias || 0) - (diasSubsidio + diasDescuento);
+        const paRow = pagoActualRes.recordset[0];
+        const tieneDetalles = detallePagosRes.recordset.length > 0;
 
         res.json({
             status: 'ok',
             licencia,
-            pagoActual: pagoActualRes.recordset[0] || {
-                NumDiasLicencia: licencia.NumDias,
-                NumDiasPagados: diasSubsidio + diasDescuento,
-                DiasCobrar: diasCobrarCalc,
-                TotalPagado: totalMontoDetalle,
-                Descuento: licencia.MontoDesc
+            pagoActual: {
+                NumDiasLicencia: paRow ? paRow.NumDiasLicencia : licencia.NumDias,
+                NumDiasPagados: tieneDetalles ? totalDiasDetalle : (paRow ? paRow.NumDiasPagados : 0),
+                DiasCobrar: tieneDetalles ? diasCobrarCalc : (paRow ? paRow.DiasCobrar : diasCobrarCalc),
+                TotalPagado: tieneDetalles ? totalMontoDetalle : (paRow ? paRow.TotalPagado : 0),
+                Descuento: paRow ? paRow.Descuento : licencia.MontoDesc
             },
             resumenDetalle: {
                 diasSubsidio,
@@ -568,7 +583,7 @@ router.get('/licencia/:numero', async (req, res) => {
                 diasAporte,
                 diasSinConcepto,
                 diasCobrar: diasCobrarCalc,
-                totalPagado: totalMontoDetalle
+                totalPagado: tieneDetalles ? totalMontoDetalle : (paRow ? paRow.TotalPagado : 0)
             },
             detallePagos: detallePagosRes.recordset
         });
