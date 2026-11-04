@@ -573,7 +573,7 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasAporte,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
-                    MAX(COALESCE(FechaDepCtaCte, recepcion)) as FechaPagoRaw,
+                    MAX(FechaDepCtaCte) as FechaPagoRaw,
                     COUNT(*) as CantPagos
                 FROM LIC_DETALLE_PAGO_ACTUAL
                 GROUP BY RTRIM(CAST(NumeroLicencia AS VARCHAR(50)))

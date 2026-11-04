@@ -125,6 +125,14 @@ function translateSingleTSqlToPostgres(queryText, paramsMap) {
 
     // 4. Funciones comunes T-SQL -> PostgreSQL
     q = q.replace(/\bISNULL\s*\(/gi, 'COALESCE(');
+    q = q.replace(
+        /\bCOALESCE\s*\(\s*([A-Za-z0-9_.]*(?:Rechazo|regularizado|Maternal|Parcial|Retenida|Pendiente|Descuento))\s*,\s*0\s*\)\s*=\s*([01])\b/gi,
+        (_, col, bitVal) => `COALESCE(${col}::boolean, false) = ${bitVal === '1' ? 'true' : 'false'}`
+    );
+    q = q.replace(
+        /\bCOALESCE\s*\(\s*([A-Za-z0-9_.]*(?:Rechazo|regularizado|Maternal|Parcial|Retenida|Pendiente|Descuento))\s*,\s*0\s*\)/gi,
+        '(CASE WHEN COALESCE($1::boolean, false) THEN 1 ELSE 0 END)'
+    );
     q = q.replace(/\bGETDATE\s*\(\s*\)/gi, 'CURRENT_TIMESTAMP');
     q = q.replace(/\bLEN\s*\(/gi, 'LENGTH(');
     q = q.replace(/\bYEAR\s*\(\s*CURRENT_TIMESTAMP\s*\)/gi, 'EXTRACT(YEAR FROM CURRENT_TIMESTAMP)::INT');
@@ -254,7 +262,7 @@ class DualRequestWrapper {
     async query(queryText) {
         const qTrim = String(queryText).trim();
         const isWrite = /^\s*(INSERT|UPDATE|DELETE)\b/i.test(qTrim);
-        const isMaxQuery = /\bMAX\s*\(/i.test(qTrim) && /^\s*SELECT\b/i.test(qTrim);
+        const isMaxQuery = /^\s*SELECT\s+(?:TOP\s+\d+\s+)?(?:ISNULL\s*\(\s*|COALESCE\s*\(\s*)?MAX\s*\(/i.test(qTrim) && !/\bGROUP\s+BY\b/i.test(qTrim);
 
         if (isWrite) {
             const [pgOutcome, mssqlOutcome] = await Promise.allSettled([
