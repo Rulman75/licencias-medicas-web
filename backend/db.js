@@ -1,10 +1,18 @@
 const sql = require('mssql');
-const { Pool: PgPool, types: pgTypes } = require('pg');
 require('dotenv').config();
 
-// Convertir INT8 / BIGINT y NUMERIC a Number de JS igual que mssql
-pgTypes.setTypeParser(20, val => (val === null ? null : parseInt(val, 10)));
-pgTypes.setTypeParser(1700, val => (val === null ? null : Number(val)));
+let PgPool = null;
+let pgTypes = null;
+try {
+    const pgMod = require('pg');
+    PgPool = pgMod.Pool;
+    pgTypes = pgMod.types;
+    // Convertir INT8 / BIGINT y NUMERIC a Number de JS igual que mssql
+    pgTypes.setTypeParser(20, val => (val === null ? null : parseInt(val, 10)));
+    pgTypes.setTypeParser(1700, val => (val === null ? null : Number(val)));
+} catch (err) {
+    console.warn('[DB] Módulo "pg" no disponible, operando exclusivamente con SQL Server:', err.message);
+}
 
 const DB_ENGINE = (process.env.DB_ENGINE || 'dual').toLowerCase();
 
@@ -322,7 +330,7 @@ function createMssqlConfig() {
             password: process.env.DB_PASS || process.env.DB_PASSWORD,
             server: process.env.DB_PORT ? serverHost : rawServer,
             ...(process.env.DB_PORT ? { port: Number(process.env.DB_PORT) } : {}),
-            database: process.env.DB_NAME,
+            database: process.env.DB_NAME || process.env.DB_DATABASE || 'BDLicencias',
             requestTimeout: 90000,
             connectionTimeout: 30000,
             options: {
@@ -340,72 +348,92 @@ function createMssqlConfig() {
     };
 }
 
-let poolPromise;
+let poolPromise = null;
 
-if (DB_ENGINE === 'dual' || DB_ENGINE === 'ambos' || DB_ENGINE === 'marcha_blanca') {
-    const pgConfig = createPgConfig('bd_licencias');
+async function initPool() {
     const { rawServer, config: mssqlConfig } = createMssqlConfig();
+
+    // Si pg no está instalado o el modo es mssql, usar exclusivamente SQL Server
+    if (!PgPool || (DB_ENGINE !== 'dual' && DB_ENGINE !== 'ambos' && DB_ENGINE !== 'marcha_blanca' && DB_ENGINE !== 'postgres' && DB_ENGINE !== 'pg' && DB_ENGINE !== 'postgresql')) {
+        const pool = await new sql.ConnectionPool(mssqlConfig).connect();
+        console.log('Connected to SQL Server successfully (' + rawServer + ' -> ' + process.env.DB_NAME + ')');
+        return pool;
+    }
+
+    if (DB_ENGINE === 'postgres' || DB_ENGINE === 'pg' || DB_ENGINE === 'postgresql') {
+        const pgConfig = createPgConfig('bd_licencias');
+        const pgPool = new PgPool(pgConfig);
+        await pgPool.query('SELECT 1');
+        console.log(`Conectado a PostgreSQL exitosamente (${pgConfig.host || 'URL'} -> ${pgConfig.database || 'bd_licencias'})`);
+        return {
+            request: () => new PgRequestWrapper(pgPool),
+            query: (q) => new PgRequestWrapper(pgPool).query(q),
+            close: () => pgPool.end()
+        };
+    }
+
+    // Modo DUAL (SQL Server + PostgreSQL) con fallback automático si uno de los dos no responde
+    const pgConfig = createPgConfig('bd_licencias');
     const pgPool = new PgPool(pgConfig);
 
-    poolPromise = Promise.all([
+    const [mssqlOut, pgOut] = await Promise.allSettled([
         new sql.ConnectionPool(mssqlConfig).connect(),
         pgPool.query('SELECT 1')
-    ])
-        .then(([mssqlPool]) => {
-            console.log(
-                `[MODO MARCHA BLANCA DUAL] Conectado simultáneamente a SQL Server (${rawServer} -> ${mssqlConfig.database}) y PostgreSQL (${pgConfig.host} -> ${pgConfig.database})`
-            );
-            return {
-                request: () => new DualRequestWrapper(mssqlPool, pgPool),
-                query: (q) => new DualRequestWrapper(mssqlPool, pgPool).query(q),
-                close: async () => {
-                    await Promise.allSettled([mssqlPool.close(), pgPool.end()]);
-                }
-            };
-        })
-        .catch(err => {
-            console.error('Error al inicializar conexión DUAL (SQL Server + PostgreSQL):', err.message);
-            throw err;
-        });
-} else if (DB_ENGINE === 'postgres' || DB_ENGINE === 'pg' || DB_ENGINE === 'postgresql') {
-    const pgConfig = createPgConfig('bd_licencias');
-    const pgPool = new PgPool(pgConfig);
-    poolPromise = pgPool
-        .query('SELECT 1')
-        .then(() => {
-            console.log(`Conectado a PostgreSQL exitosamente (${pgConfig.host || 'URL'} -> ${pgConfig.database || 'bd_licencias'})`);
-            return {
-                request: () => new PgRequestWrapper(pgPool),
-                query: (q) => new PgRequestWrapper(pgPool).query(q),
-                close: () => pgPool.end()
-            };
-        })
-        .catch(err => {
-            console.error('Error de conexión a PostgreSQL:', err.message);
-            throw err;
-        });
-} else {
-    const { rawServer, config } = createMssqlConfig();
+    ]);
 
-    poolPromise = new sql.ConnectionPool(config)
-        .connect()
-        .then(pool => {
-            console.log('Connected to SQL Server successfully (' + rawServer + ' -> ' + process.env.DB_NAME + ')');
-            return pool;
-        })
-        .catch(err => {
-            console.error('Database connection failed!', err);
+    if (mssqlOut.status === 'fulfilled' && pgOut.status === 'fulfilled') {
+        const mssqlPool = mssqlOut.value;
+        console.log(
+            `[MODO MARCHA BLANCA DUAL] Conectado simultáneamente a SQL Server (${rawServer} -> ${mssqlConfig.database}) y PostgreSQL (${pgConfig.host} -> ${pgConfig.database})`
+        );
+        return {
+            request: () => new DualRequestWrapper(mssqlPool, pgPool),
+            query: (q) => new DualRequestWrapper(mssqlPool, pgPool).query(q),
+            close: async () => {
+                await Promise.allSettled([mssqlPool.close(), pgPool.end()]);
+            }
+        };
+    }
+
+    if (mssqlOut.status === 'fulfilled') {
+        console.warn('[DB DUAL] PostgreSQL no disponible (' + (pgOut.reason?.message || 'error') + '). Operando con SQL Server.');
+        pgPool.end().catch(() => {});
+        return mssqlOut.value;
+    }
+
+    if (pgOut.status === 'fulfilled') {
+        console.warn('[DB DUAL] SQL Server no disponible (' + (mssqlOut.reason?.message || 'error') + '). Operando con PostgreSQL.');
+        return {
+            request: () => new PgRequestWrapper(pgPool),
+            query: (q) => new PgRequestWrapper(pgPool).query(q),
+            close: () => pgPool.end()
+        };
+    }
+
+    throw mssqlOut.reason || pgOut.reason;
+}
+
+async function getConnection() {
+    if (!poolPromise) {
+        poolPromise = initPool().catch(err => {
+            console.error('Database connection failed!', err.message);
             poolPromise = null;
             throw err;
         });
+    }
+    return poolPromise;
 }
 
-const getPool = async () => poolPromise;
-const getConnection = async () => poolPromise;
+const getPool = getConnection;
+
+// Pre-conectar en segundo plano sin provocar UnhandledPromiseRejection
+getConnection().catch(() => {});
 
 module.exports = {
     sql,
-    poolPromise,
+    get poolPromise() {
+        return getConnection();
+    },
     getPool,
     getConnection,
     DB_ENGINE
