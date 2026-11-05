@@ -723,9 +723,10 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
 app.get('/api/dashboard/stats', async (req, res) => {
     try {
         const pool = await getConnection();
-        const { year, startYear, sector, codUnidad, codSalud, vigencia, modulo, mutualidad, tipoSiniestro, tipoAlta } = req.query;
+        const { year, month, criterio, startYear, sector, codUnidad, codSalud, vigencia, modulo, mutualidad, tipoSiniestro, tipoAlta } = req.query;
         
         const reqDb = pool.request();
+        const campoFecha = criterio === 'recepcion' ? 'L.Recepcion' : 'L.Desde';
 
         let condition = `NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP')`;
         if (modulo === 'reposo') {
@@ -741,16 +742,20 @@ app.get('/api/dashboard/stats', async (req, res) => {
                 AND HPA.Anio = YEAR(L.Desde) 
                 AND HPA.Mes = MONTH(L.Desde)
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
-            LEFT JOIN LIC_SALUD S ON HPA.CodSalud = S.CodSalud
+            LEFT JOIN LIC_SALUD S ON COALESCE(HPA.CodSalud, TRY_CAST(F.UltimaPrev AS INT)) = S.CodSalud
         `;
 
         let filters = "";
         if (year) {
-            filters += " AND YEAR(L.Desde) = @Year ";
+            filters += ` AND YEAR(${campoFecha}) = @Year `;
             reqDb.input('Year', sql.Int, parseInt(year, 10));
         }
+        if (month) {
+            filters += ` AND MONTH(${campoFecha}) = @Month `;
+            reqDb.input('Month', sql.Int, parseInt(month, 10));
+        }
         if (startYear) {
-            filters += " AND YEAR(L.Desde) >= @StartYear ";
+            filters += ` AND YEAR(${campoFecha}) >= @StartYear `;
             reqDb.input('StartYear', sql.Int, parseInt(startYear, 10));
         }
         if (sector === 'educacion') {
@@ -791,7 +796,7 @@ app.get('/api/dashboard/stats', async (req, res) => {
         }
 
         const buildQuery = (extraCondition) => `
-            SELECT COUNT(*) as Cantidad, SUM(PagoEstimado) as TotalMonto
+            SELECT COUNT(*) as Cantidad, SUM(CAST(PagoEstimado AS BIGINT)) as TotalMonto
             FROM (
                 SELECT L.NumeroLicencia, MAX(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) AS PagoEstimado
                 ${baseFromAndJoins}
@@ -815,11 +820,11 @@ app.get('/api/dashboard/stats', async (req, res) => {
         const qSector = await reqDb.query(`
             SELECT GroupLabel as Label, 
                    COUNT(*) as Cantidad, 
-                   SUM(PagoEstimado) as TotalMonto,
+                   SUM(CAST(PagoEstimado AS BIGINT)) as TotalMonto,
                    SUM(CASE WHEN Pagado = 1 THEN 1 ELSE 0 END) as PagadasCantidad,
                    SUM(CASE WHEN Pagado = 0 THEN 1 ELSE 0 END) as ImpagasCantidad,
-                   SUM(CASE WHEN Pagado = 1 THEN PagoEstimado ELSE 0 END) as PagadasMonto,
-                   SUM(CASE WHEN Pagado = 0 THEN PagoEstimado ELSE 0 END) as ImpagasMonto
+                   SUM(CAST(CASE WHEN Pagado = 1 THEN PagoEstimado ELSE 0 END AS BIGINT)) as PagadasMonto,
+                   SUM(CAST(CASE WHEN Pagado = 0 THEN PagoEstimado ELSE 0 END AS BIGINT)) as ImpagasMonto
             FROM (
                 SELECT L.NumeroLicencia, 
                        MAX(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) AS PagoEstimado,
@@ -838,11 +843,11 @@ app.get('/api/dashboard/stats', async (req, res) => {
         const qEntidad = await reqDb.query(`
             SELECT GroupLabel as Label, 
                    COUNT(*) as Cantidad, 
-                   SUM(PagoEstimado) as TotalMonto,
+                   SUM(CAST(PagoEstimado AS BIGINT)) as TotalMonto,
                    SUM(CASE WHEN Pagado = 1 THEN 1 ELSE 0 END) as PagadasCantidad,
                    SUM(CASE WHEN Pagado = 0 THEN 1 ELSE 0 END) as ImpagasCantidad,
-                   SUM(CASE WHEN Pagado = 1 THEN PagoEstimado ELSE 0 END) as PagadasMonto,
-                   SUM(CASE WHEN Pagado = 0 THEN PagoEstimado ELSE 0 END) as ImpagasMonto
+                   SUM(CAST(CASE WHEN Pagado = 1 THEN PagoEstimado ELSE 0 END AS BIGINT)) as PagadasMonto,
+                   SUM(CAST(CASE WHEN Pagado = 0 THEN PagoEstimado ELSE 0 END AS BIGINT)) as ImpagasMonto
             FROM (
                 SELECT L.NumeroLicencia, 
                        MAX(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) AS PagoEstimado,
@@ -857,9 +862,57 @@ app.get('/api/dashboard/stats', async (req, res) => {
             GROUP BY GroupLabel
         `);
 
+        // 6. Agrupación por Mes (Enero a Diciembre según criterio de fecha)
+        const qMes = await reqDb.query(`
+            SELECT MesNum,
+                   COUNT(*) as Cantidad,
+                   SUM(CAST(PagoEstimado AS BIGINT)) as TotalMonto,
+                   SUM(CASE WHEN Pagado = 1 THEN 1 ELSE 0 END) as PagadasCantidad,
+                   SUM(CASE WHEN Pagado = 0 THEN 1 ELSE 0 END) as ImpagasCantidad,
+                   SUM(CAST(CASE WHEN Pagado = 1 THEN PagoEstimado ELSE 0 END AS BIGINT)) as PagadasMonto,
+                   SUM(CAST(CASE WHEN Pagado = 0 THEN PagoEstimado ELSE 0 END AS BIGINT)) as ImpagasMonto
+            FROM (
+                SELECT L.NumeroLicencia,
+                       MAX(MONTH(${campoFecha})) as MesNum,
+                       MAX(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) AS PagoEstimado,
+                       MAX(CASE WHEN DP.NumeroLicencia IS NOT NULL THEN 1 ELSE 0 END) as Pagado
+                ${baseFromAndJoins}
+                LEFT JOIN (SELECT DISTINCT NumeroLicencia FROM LIC_DETALLE_PAGO_ACTUAL) DP ON DP.NumeroLicencia = L.NumeroLicencia
+                WHERE RTRIM(ISNULL(L.PagoDirecto, '')) ${condition}
+                ${filters}
+                GROUP BY L.NumeroLicencia
+            ) T
+            WHERE MesNum BETWEEN 1 AND 12
+            GROUP BY MesNum
+            ORDER BY MesNum ASC
+        `);
+
+        const mesesNombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+        const mesesCompletos = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+        const mapaMes = {};
+        for (const r of qMes.recordset) {
+            mapaMes[r.MesNum] = r;
+        }
+        const porMes = [];
+        for (let m = 1; m <= 12; m++) {
+            const rm = mapaMes[m] || {};
+            porMes.push({
+                Mes: m,
+                Label: mesesNombres[m - 1],
+                MesNombre: mesesCompletos[m - 1],
+                Cantidad: Number(rm.Cantidad || 0),
+                TotalMonto: Number(rm.TotalMonto || 0),
+                PagadasCantidad: Number(rm.PagadasCantidad || 0),
+                ImpagasCantidad: Number(rm.ImpagasCantidad || 0),
+                PagadasMonto: Number(rm.PagadasMonto || 0),
+                ImpagasMonto: Number(rm.ImpagasMonto || 0)
+            });
+        }
+
         res.json({ 
             status: 'ok', 
             data: {
+                criterio: criterio === 'recepcion' ? 'recepcion' : 'desde',
                 universo: qUniverso.recordset[0] || { Cantidad: 0, TotalMonto: 0 },
                 pagadas: qPagadas.recordset[0] || { Cantidad: 0, TotalMonto: 0 },
                 noPagadas: qNoPagadas.recordset[0] || { Cantidad: 0, TotalMonto: 0 },
@@ -868,7 +921,8 @@ app.get('/api/dashboard/stats', async (req, res) => {
                     { name: 'Impagas', value: qNoPagadas.recordset[0]?.Cantidad || 0 }
                 ],
                 porSector: qSector.recordset,
-                porEntidad: qEntidad.recordset
+                porEntidad: qEntidad.recordset,
+                porMes
             }
         });
     } catch (error) {
@@ -1047,7 +1101,8 @@ app.get('/api/dominios', async (req, res) => {
 app.get('/api/licencias/detalle', async (req, res) => {
     try {
         const pool = await getConnection();
-        const { year, startYear, type, sector, codUnidad, codSalud, vigencia, modulo, mutualidad, tipoSiniestro, tipoAlta } = req.query; // type: 'universo', 'pagadas', 'impagas'
+        const { year, month, criterio, startYear, type, sector, codUnidad, codSalud, vigencia, modulo, mutualidad, tipoSiniestro, tipoAlta } = req.query; // type: 'universo', 'pagadas', 'impagas'
+        const campoFecha = criterio === 'recepcion' ? 'L.Recepcion' : 'L.Desde';
 
         let condition = `NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP')`;
         if (modulo === 'reposo') {
@@ -1067,13 +1122,14 @@ app.get('/api/licencias/detalle', async (req, res) => {
                 F.Rut, F.DV, 
                 L.PagoDirecto, 
                 L.NumDias AS NUMDIAS, 
-                L.Desde, L.Hasta, L.NumeroLicencia, L.Maternal, L.Parcial, 
-                L.Rechazo, L.Observacion, L.Estado, L.Autorizada, L.Obser_apelacion, L.Compin, 
+                L.Recepcion, L.Desde, L.Hasta, L.NumeroLicencia, L.Maternal, L.Parcial, 
+                L.Rechazo, L.Observacion, L.Observacion_Compin, L.Estado, L.Autorizada, L.Obser_apelacion, L.Compin, 
                 L.Apelacion, L.Tipo_enferm, L.MontoDesc, L.regularizado, 
                 (ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) AS PagoEstimado, 
                 L.Descuento, 
                 L.TipoLic, 
-                YEAR(L.Desde) AS año, 
+                YEAR(${campoFecha}) AS año, 
+                MONTH(${campoFecha}) AS mes, 
                 MAX(P.Descripcion) AS PrevisionDescripcion, 
                 F.vigencia, L.Retenida, L.Pendiente, L.Observacion_CajaLA,
                 CASE 
@@ -1094,7 +1150,7 @@ app.get('/api/licencias/detalle', async (req, res) => {
                 AND HPA.Anio = YEAR(L.Desde) 
                 AND HPA.Mes = MONTH(L.Desde)
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
-            LEFT JOIN LIC_SALUD S ON HPA.CodSalud = S.CodSalud
+            LEFT JOIN LIC_SALUD S ON COALESCE(HPA.CodSalud, TRY_CAST(F.UltimaPrev AS INT)) = S.CodSalud
             LEFT JOIN LIC_PREVISION P ON HPA.CodPrevision = P.CodPrevision
             WHERE RTRIM(ISNULL(L.PagoDirecto, '')) ${condition}
         `;
@@ -1102,11 +1158,15 @@ app.get('/api/licencias/detalle', async (req, res) => {
         const request = pool.request();
 
         if (year) {
-            query += ` AND YEAR(L.Desde) = @Year `;
+            query += ` AND YEAR(${campoFecha}) = @Year `;
             request.input('Year', sql.Int, parseInt(year, 10));
         }
+        if (month) {
+            query += ` AND MONTH(${campoFecha}) = @Month `;
+            request.input('Month', sql.Int, parseInt(month, 10));
+        }
         if (startYear) {
-            query += ` AND YEAR(L.Desde) >= @StartYear `;
+            query += ` AND YEAR(${campoFecha}) >= @StartYear `;
             request.input('StartYear', sql.Int, parseInt(startYear, 10));
         }
         if (sector === 'educacion') {
@@ -1156,8 +1216,8 @@ app.get('/api/licencias/detalle', async (req, res) => {
         query += `
             GROUP BY 
                 F.Rut, F.DV, F.Nombre, F.Paterno, F.Materno, F.CodUnidad, 
-                L.PagoDirecto, L.Desde, L.Hasta, L.NumeroLicencia, L.Maternal, L.Parcial, 
-                L.Rechazo, L.Observacion, L.Estado, L.Autorizada, L.Obser_apelacion, L.Compin, 
+                L.PagoDirecto, L.Recepcion, L.Desde, L.Hasta, L.NumeroLicencia, L.Maternal, L.Parcial, 
+                L.Rechazo, L.Observacion, L.Observacion_Compin, L.Estado, L.Autorizada, L.Obser_apelacion, L.Compin, 
                 L.Apelacion, L.Tipo_enferm, L.MontoDesc, L.PagoEstimado, L.regularizado, 
                 L.Descuento, L.TipoLic, L.NumDias, F.vigencia, L.Retenida, 
                 L.Pendiente, L.Observacion_CajaLA, L.altaAchs
