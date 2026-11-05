@@ -564,10 +564,10 @@ router.get('/licencias-pago-directo', async (req, res) => {
                 LEFT JOIN LIC_PAGO_ACTUAL PA ON L.NumeroLicencia = PA.NumeroLicencia
                 LEFT JOIN LIC_HISTORICO_PREVISION_ACTUAL HP
                     ON HP.Rut = F.Rut AND HP.Anio = YEAR(L.Desde) AND HP.Mes = MONTH(L.Desde)
-                LEFT JOIN LIC_SALUD S ON HP.CodSalud = S.CodSalud
+                LEFT JOIN LIC_SALUD S ON COALESCE(HP.CodSalud, TRY_CAST(F.UltimaPrev AS INT)) = S.CodSalud
                 WHERE YEAR(L.Desde) = @Anio AND MONTH(L.Desde) = @Mes
                   AND (
-                    (F.CodUnidad IN (530, 384) AND HP.CodSalud = 41 AND RTRIM(ISNULL(F.descripcionPlanta, '')) <> 'DOCENTE')
+                    (F.CodUnidad IN (530, 384) AND COALESCE(HP.CodSalud, TRY_CAST(F.UltimaPrev AS INT)) = 41 AND RTRIM(ISNULL(F.descripcionPlanta, '')) <> 'DOCENTE')
                     OR F.CodUnidad IN (501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 608, 613)
                   )
                 ORDER BY F.CodUnidad ASC, F.Paterno ASC
@@ -637,7 +637,7 @@ router.get('/general-pagos', async (req, res) => {
             INNER JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             LEFT JOIN LIC_HISTORICO_PREVISION_ACTUAL HP
                 ON HP.Rut = F.Rut AND HP.Anio = YEAR(L.Desde) AND HP.Mes = MONTH(L.Desde)
-            LEFT JOIN LIC_SALUD S ON HP.CodSalud = S.CodSalud
+            LEFT JOIN LIC_SALUD S ON COALESCE(HP.CodSalud, TRY_CAST(F.UltimaPrev AS INT)) = S.CodSalud
             LEFT JOIN LIC_PREVISION P ON HP.CodPrevision = P.CodPrevision
             LEFT JOIN (
                 SELECT

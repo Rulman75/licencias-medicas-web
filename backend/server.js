@@ -792,7 +792,7 @@ app.get('/api/dashboard/advanced-stats', async (req, res) => {
                 AND HPA.Anio = YEAR(L.Desde) 
                 AND HPA.Mes = MONTH(L.Desde)
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
-            LEFT JOIN LIC_SALUD S ON HPA.CodSalud = S.CodSalud
+            LEFT JOIN LIC_SALUD S ON COALESCE(HPA.CodSalud, TRY_CAST(F.UltimaPrev AS INT)) = S.CodSalud
             LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
         `;
 
