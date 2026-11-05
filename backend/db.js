@@ -303,10 +303,10 @@ class DualRequestWrapper {
         }
 
         try {
-            return await this.pgReq.query(queryText);
-        } catch (err) {
-            console.warn('[DUAL-READ] Fallback a SQL Server por:', err.message);
             return await this.mssqlReq.query(queryText);
+        } catch (err) {
+            console.warn('[DUAL-READ] Fallback a PostgreSQL por:', err.message);
+            return await this.pgReq.query(queryText);
         }
     }
 }
