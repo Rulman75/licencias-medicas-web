@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { VERSION_DISPLAY, VERSION_TOOLTIP } from '../version';
+import { useAppVersion } from '../version';
 
 export default function Layout() {
+  const { display: versionDisplay, tooltip: versionTooltip } = useAppVersion();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuMantencionOpen, setMenuMantencionOpen] = useState(false);
@@ -83,10 +84,10 @@ export default function Layout() {
               Gestión, Subsidios y Control CMDS
             </p>
             <span
-              title={VERSION_TOOLTIP}
+              title={versionTooltip}
               className="mt-1.5 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-white/10 text-blue-100 border border-white/15 tracking-wider"
             >
-              Versión {VERSION_DISPLAY}
+              Versión {versionDisplay}
             </span>
 
             {userData.username && (

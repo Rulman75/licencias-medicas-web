@@ -53,7 +53,7 @@ const publicDir = path.join(rootDir, 'backend', 'public');
 fs.cpSync(distDir, publicDir, { recursive: true, force: true });
 
 console.log(`Creando commit y tag Git v${nextVersion}...`);
-execSync('git add frontend/package.json backend/package.json backend/public/', { cwd: rootDir, stdio: 'inherit' });
+execSync('git add frontend/package.json backend/package.json frontend/src/ backend/public/ backend/server.js backend/db.js backend/routes/ scripts/release.js', { cwd: rootDir, stdio: 'inherit' });
 execSync(`git commit -m "chore(release): v${nextVersion}"`, { cwd: rootDir, stdio: 'inherit' });
 execSync(`git tag -a v${nextVersion} -m "Release v${nextVersion}"`, { cwd: rootDir, stdio: 'inherit' });
 execSync('git push origin main --follow-tags', { cwd: rootDir, stdio: 'inherit' });

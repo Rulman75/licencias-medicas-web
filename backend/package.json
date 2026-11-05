@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "2.2.1",
+  "version": "2.2.3",
   "description": "Sistema de Licencias Medicas CMDS",
   "main": "index.js",
   "scripts": {

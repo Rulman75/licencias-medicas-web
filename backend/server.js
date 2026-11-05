@@ -15,6 +15,24 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3001;
 
+app.get('/api/version', (req, res) => {
+    try {
+        delete require.cache[require.resolve('./package.json')];
+        const pkg = require('./package.json');
+        let commit = '';
+        let date = '';
+        try {
+            const { execSync } = require('child_process');
+            commit = execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim();
+            date = execSync('git log -1 --format=%cd --date=short', { cwd: __dirname }).toString().trim();
+        } catch {}
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.json({ status: 'ok', version: pkg.version || '2.2.3', commit, date });
+    } catch (e) {
+        res.json({ status: 'ok', version: '2.2.3', commit: '', date: '' });
+    }
+});
+
 // Simple route to test DB connection
 app.get('/api/health', async (req, res) => {
     try {

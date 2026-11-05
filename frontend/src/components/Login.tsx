@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { VERSION_DISPLAY, VERSION_TOOLTIP } from '../version';
+import { useAppVersion } from '../version';
 
 export default function Login() {
+  const { display: versionDisplay, tooltip: versionTooltip } = useAppVersion();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -76,10 +77,10 @@ export default function Login() {
             </p>
             <div className="mt-4">
               <span
-                title={VERSION_TOOLTIP}
+                title={versionTooltip}
                 className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/15 text-blue-50 border border-white/20 shadow-sm tracking-wide"
               >
-                Versión {VERSION_DISPLAY}
+                Versión {versionDisplay}
               </span>
             </div>
           </div>
