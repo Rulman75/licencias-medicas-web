@@ -361,7 +361,7 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
     try {
         const pool = await getConnection();
         const year = parseInt(req.query.year, 10) || new Date().getFullYear();
-        const criterio = req.query.criterio === 'desde' ? 'L.Desde' : 'L.Recepcion';
+        const criterio = req.query.criterio === 'recepcion' ? 'L.Recepcion' : 'L.Desde';
         const sector = String(req.query.sector || '').toLowerCase();
 
         let sectorFilter = '';
@@ -379,7 +379,11 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                     SUM(COALESCE(L.DiasAutorizados, 0)) as TotalDiasAut,
                     SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as LicenciasPagadas,
                     SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasSinPago,
+                    SUM(CASE WHEN COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasPorCobrarSalud,
                     SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 THEN 1 ELSE 0 END) as LicenciasRechazadas,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND (COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 OR COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0)) AND RTRIM(ISNULL(F.vigencia, '')) = 'S' THEN 1 ELSE 0 END) as RechazadasRecuperablesCant,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND (COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 OR COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0)) AND RTRIM(ISNULL(F.vigencia, '')) <> 'S' THEN 1 ELSE 0 END) as RechazadasIncobrablesCant,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) >= COALESCE(L.PagoEstimado, 0) THEN 1 ELSE 0 END) as RechazadasRecuperadasCant,
                     SUM(CASE WHEN ISNULL(L.regularizado, 0) = 1 THEN 1 ELSE 0 END) as LicenciasReducidas,
                     SUM(COALESCE(DP.DiasSubsidio, P.NumDiasPagados, 0)) as DiasSubsidio,
                     SUM(COALESCE(DP.DiasAporte, 0)) as DiasAporte,
@@ -399,7 +403,27 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                             WHEN ISNULL(L.Rechazo, 0) = 1 THEN COALESCE(L.PagoEstimado, 0)
                             ELSE 0
                         END AS BIGINT
-                    )) as MontoRechazado
+                    )) as MontoRechazado,
+                    SUM(CAST(
+                        CASE
+                            WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND RTRIM(ISNULL(F.vigencia, '')) = 'S'
+                            THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                            ELSE 0
+                        END AS BIGINT
+                    )) as MontoRechazadoRecuperable,
+                    SUM(CAST(
+                        CASE
+                            WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND RTRIM(ISNULL(F.vigencia, '')) <> 'S'
+                            THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                            ELSE 0
+                        END AS BIGINT
+                    )) as MontoRechazadoIncobrable,
+                    SUM(CAST(
+                        CASE
+                            WHEN ISNULL(L.Rechazo, 0) = 1 THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                            ELSE 0
+                        END AS BIGINT
+                    )) as MontoRechazadoRecuperado
                 FROM LIC_LICENCIA_ACTUAL L
                 LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
                 LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
@@ -441,7 +465,11 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
             TotalDiasAut: 0,
             LicenciasPagadas: 0,
             LicenciasSinPago: 0,
+            LicenciasPorCobrarSalud: 0,
             LicenciasRechazadas: 0,
+            RechazadasRecuperablesCant: 0,
+            RechazadasIncobrablesCant: 0,
+            RechazadasRecuperadasCant: 0,
             LicenciasReducidas: 0,
             DiasSubsidio: 0,
             DiasAporte: 0,
@@ -450,7 +478,11 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
             PagadoSubsidio: 0,
             PagadoAporte: 0,
             FaltaPorCobrar: 0,
-            MontoRechazado: 0
+            MontoRechazado: 0,
+            MontoRechazadoRecuperable: 0,
+            MontoRechazadoIncobrable: 0,
+            MontoRechazadoRecuperado: 0,
+            FaltaPorCobrarTotal: 0
         };
 
         for (let m = 1; m <= 12; m++) {
@@ -461,6 +493,8 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
             const totalLic = Number(r.TotalLicencias || 0);
             const licPag = Number(r.LicenciasPagadas || 0);
             const licRech = Number(r.LicenciasRechazadas || 0);
+            const mRecup = Number(r.MontoRechazadoRecuperable || 0);
+            const mIncob = Number(r.MontoRechazadoIncobrable || 0);
 
             const rowObj = {
                 Mes: m,
@@ -472,7 +506,11 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                 TotalDiasAut: Number(r.TotalDiasAut || 0),
                 LicenciasPagadas: licPag,
                 LicenciasSinPago: Number(r.LicenciasSinPago || 0),
+                LicenciasPorCobrarSalud: Number(r.LicenciasPorCobrarSalud || 0),
                 LicenciasRechazadas: licRech,
+                RechazadasRecuperablesCant: Number(r.RechazadasRecuperablesCant || 0),
+                RechazadasIncobrablesCant: Number(r.RechazadasIncobrablesCant || 0),
+                RechazadasRecuperadasCant: Number(r.RechazadasRecuperadasCant || 0),
                 LicenciasReducidas: Number(r.LicenciasReducidas || 0),
                 DiasSubsidio: Number(r.DiasSubsidio || 0),
                 DiasAporte: Number(r.DiasAporte || 0),
@@ -482,6 +520,10 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                 PagadoAporte: Number(r.PagadoAporte || 0),
                 FaltaPorCobrar: falta,
                 MontoRechazado: Number(r.MontoRechazado || 0),
+                MontoRechazadoRecuperable: mRecup,
+                MontoRechazadoIncobrable: mIncob,
+                MontoRechazadoRecuperado: Number(r.MontoRechazadoRecuperado || 0),
+                FaltaPorCobrarTotal: falta + mRecup + mIncob,
                 PorcentajePago: est > 0 ? Number(((pag / est) * 100).toFixed(1)) : 0,
                 PorcentajeCobertura: totalLic > 0 ? Number(((licPag / totalLic) * 100).toFixed(1)) : 0
             };
@@ -494,7 +536,11 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
             totales.TotalDiasAut += rowObj.TotalDiasAut;
             totales.LicenciasPagadas += rowObj.LicenciasPagadas;
             totales.LicenciasSinPago += rowObj.LicenciasSinPago;
+            totales.LicenciasPorCobrarSalud += rowObj.LicenciasPorCobrarSalud;
             totales.LicenciasRechazadas += rowObj.LicenciasRechazadas;
+            totales.RechazadasRecuperablesCant += rowObj.RechazadasRecuperablesCant;
+            totales.RechazadasIncobrablesCant += rowObj.RechazadasIncobrablesCant;
+            totales.RechazadasRecuperadasCant += rowObj.RechazadasRecuperadasCant;
             totales.LicenciasReducidas += rowObj.LicenciasReducidas;
             totales.DiasSubsidio += rowObj.DiasSubsidio;
             totales.DiasAporte += rowObj.DiasAporte;
@@ -504,6 +550,10 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
             totales.PagadoAporte += rowObj.PagadoAporte;
             totales.FaltaPorCobrar += rowObj.FaltaPorCobrar;
             totales.MontoRechazado += rowObj.MontoRechazado;
+            totales.MontoRechazadoRecuperable += rowObj.MontoRechazadoRecuperable;
+            totales.MontoRechazadoIncobrable += rowObj.MontoRechazadoIncobrable;
+            totales.MontoRechazadoRecuperado += rowObj.MontoRechazadoRecuperado;
+            totales.FaltaPorCobrarTotal += rowObj.FaltaPorCobrarTotal;
         }
 
         totales.PorcentajePago = totales.TotalEstimado > 0
@@ -516,7 +566,7 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
         res.json({
             status: 'ok',
             year,
-            criterio: req.query.criterio === 'desde' ? 'desde' : 'recepcion',
+            criterio: req.query.criterio === 'recepcion' ? 'recepcion' : 'desde',
             meses,
             totales
         });
@@ -532,7 +582,7 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
         const pool = await getConnection();
         const year = parseInt(req.query.year, 10) || new Date().getFullYear();
         const month = req.query.month ? parseInt(req.query.month, 10) : 0;
-        const criterio = req.query.criterio === 'desde' ? 'L.Desde' : 'L.Recepcion';
+        const criterio = req.query.criterio === 'recepcion' ? 'L.Recepcion' : 'L.Desde';
         const sector = String(req.query.sector || '').toLowerCase();
 
         const reqDb = pool.request().input('Year', sql.Int, year);
@@ -550,6 +600,7 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                 RTRIM(L.RutFuncionario) as Rut,
                 RTRIM(ISNULL(F.DV, ISNULL(L.dv, ''))) as DV,
                 RTRIM(ISNULL(F.Nombre, '')) + ' ' + RTRIM(ISNULL(F.Paterno, '')) + ' ' + RTRIM(ISNULL(F.Materno, '')) as Funcionario,
+                RTRIM(ISNULL(F.vigencia, 'N')) as Vigencia,
                 CASE WHEN COALESCE(F.CodUnidad, 0) < 600 THEN 'Educación' ELSE 'Salud' END as Sector,
                 COALESCE(F.CodUnidad, 0) as CodUnidad,
                 RTRIM(ISNULL(E.Descripcion, '')) as Establecimiento,
@@ -571,6 +622,11 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                     THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
                     ELSE 0
                 END as FaltaPorCobrar,
+                CASE 
+                    WHEN COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                    THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                    ELSE 0
+                END as SaldoPendiente,
                 COALESCE(DP.CantPagos, 0) as CantidadPagos,
                 ISNULL(L.Rechazo, 0) as Rechazo,
                 ISNULL(L.regularizado, 0) as Reducida,
@@ -613,8 +669,42 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                     diasDemoraPago = Math.max(0, Math.round((dPago.getTime() - dBase.getTime()) / (1000 * 60 * 60 * 24)));
                 }
             }
+
+            const esRechazada = Boolean(r.Rechazo);
+            const esVigente = String(r.Vigencia || '').toUpperCase() === 'S';
+            const pagado = Number(r.MontoPagado || 0);
+            const estimado = Number(r.PagoEstimado || 0);
+            const tieneSaldoPendiente = pagado === 0 || estimado > pagado;
+
+            let escenarioCobro = 'PAGADA';
+            let situacionCobroLabel = 'Pagada / Recuperada';
+            if (esRechazada) {
+                if (tieneSaldoPendiente) {
+                    if (esVigente) {
+                        escenarioCobro = 'RECHAZADA_RECUPERABLE';
+                        situacionCobroLabel = 'Rechazada Recuperable (Vigente - Desc. Remun.)';
+                    } else {
+                        escenarioCobro = 'RECHAZADA_INCOBRABLE';
+                        situacionCobroLabel = 'Rechazada Incobrable (No Vigente)';
+                    }
+                } else {
+                    escenarioCobro = 'RECHAZADA_RECUPERADA';
+                    situacionCobroLabel = 'Rechazada Ya Recuperada';
+                }
+            } else if (estimado > pagado) {
+                escenarioCobro = 'POR_COBRAR_SALUD';
+                situacionCobroLabel = pagado === 0 ? 'Por Cobrar Salud ($0)' : 'Por Cobrar Salud (Pago Parcial)';
+            } else if (pagado === 0) {
+                escenarioCobro = 'SIN_PAGO';
+                situacionCobroLabel = 'Sin Pago ($0)';
+            }
+
             return {
                 ...r,
+                Vigencia: esVigente ? 'S' : 'N',
+                VigenciaLabel: esVigente ? 'Vigente' : 'No Vigente',
+                EscenarioCobro: escenarioCobro,
+                SituacionCobroLabel: situacionCobroLabel,
                 FechaPago: fechaPagoStr,
                 DiasDemoraPago: diasDemoraPago
             };
