@@ -121,11 +121,11 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
         const dpJoin = `
             LEFT JOIN (
                 SELECT 
-                    RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) as NumeroLicencia,
+                    NumeroLicencia,
                     SUM(COALESCE(Monto, 0)) as SumaMonto
                 FROM LIC_DETALLE_PAGO_ACTUAL
-                GROUP BY RTRIM(CAST(NumeroLicencia AS VARCHAR(50)))
-            ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
+                GROUP BY NumeroLicencia
+            ) DP ON L.NumeroLicencia = DP.NumeroLicencia
         `;
 
         // 1. KPIs Generales, Sectoriales y Financieros
@@ -387,7 +387,7 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                 LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 LEFT JOIN (
                     SELECT
-                        RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) as NumeroLicencia,
+                        NumeroLicencia,
                         SUM(COALESCE(Monto, 0)) as SumaMonto,
                         SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoAporte,
                         SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
@@ -395,8 +395,8 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                         SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
                         COUNT(*) as CantPagos
                     FROM LIC_DETALLE_PAGO_ACTUAL
-                    GROUP BY RTRIM(CAST(NumeroLicencia AS VARCHAR(50)))
-                ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
+                    GROUP BY NumeroLicencia
+                ) DP ON L.NumeroLicencia = DP.NumeroLicencia
                 WHERE RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP')
                   AND YEAR(${criterio}) = @Year
                   ${sectorFilter}
@@ -567,7 +567,7 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
             LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
             LEFT JOIN (
                 SELECT
-                    RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) as NumeroLicencia,
+                    NumeroLicencia,
                     SUM(COALESCE(Monto, 0)) as SumaMonto,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoAporte,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
@@ -576,8 +576,8 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                     MAX(FechaDepCtaCte) as FechaPagoRaw,
                     COUNT(*) as CantPagos
                 FROM LIC_DETALLE_PAGO_ACTUAL
-                GROUP BY RTRIM(CAST(NumeroLicencia AS VARCHAR(50)))
-            ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
+                GROUP BY NumeroLicencia
+            ) DP ON L.NumeroLicencia = DP.NumeroLicencia
             WHERE RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP')
               AND YEAR(${criterio}) = @Year
               ${extraWhere}

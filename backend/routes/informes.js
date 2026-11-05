@@ -268,16 +268,16 @@ router.get('/por-funcionario', async (req, res) => {
                     ISNULL(P.TotalPagado, 0) as TotalPagadoTabla,
                     ISNULL(DP.SumaMonto, 0) as MontoPagadoDetalle
                 FROM LIC_LICENCIA_ACTUAL L
-                LEFT JOIN LIC_FUNCIONARIO F ON RTRIM(L.RutFuncionario) = RTRIM(F.Rut)
+                LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
                 LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
-                LEFT JOIN LIC_PAGO_ACTUAL P ON RTRIM(L.NumeroLicencia) = RTRIM(P.NumeroLicencia)
+                LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 LEFT JOIN (
                     SELECT 
-                        RTRIM(CONVERT(varchar(50), NumeroLicencia)) as NumeroLicencia,
+                        NumeroLicencia,
                         SUM(ISNULL(Monto, 0)) as SumaMonto
                     FROM LIC_DETALLE_PAGO_ACTUAL
-                    GROUP BY RTRIM(CONVERT(varchar(50), NumeroLicencia))
-                ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
+                    GROUP BY NumeroLicencia
+                ) DP ON L.NumeroLicencia = DP.NumeroLicencia
                 ${rangoWhere}
                 ORDER BY L.Desde DESC
             `);
@@ -339,15 +339,15 @@ router.get('/por-funcionario', async (req, res) => {
                     ISNULL(P.TotalPagado, 0) as TotalPagadoTabla,
                     ISNULL(DP.SumaMonto, 0) as MontoPagadoDetalle
                 FROM LIC_LICENCIA_ACTUAL L
-                LEFT JOIN LIC_PAGO_ACTUAL P ON RTRIM(L.NumeroLicencia) = RTRIM(P.NumeroLicencia)
+                LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 LEFT JOIN (
                     SELECT 
-                        RTRIM(CONVERT(varchar(50), NumeroLicencia)) as NumeroLicencia,
+                        NumeroLicencia,
                         SUM(ISNULL(Monto, 0)) as SumaMonto
                     FROM LIC_DETALLE_PAGO_ACTUAL
-                    GROUP BY RTRIM(CONVERT(varchar(50), NumeroLicencia))
-                ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
-                WHERE RTRIM(L.RutFuncionario) = @Rut ${licDateFilter}
+                    GROUP BY NumeroLicencia
+                ) DP ON L.NumeroLicencia = DP.NumeroLicencia
+                WHERE L.RutFuncionario = @Rut ${licDateFilter}
                 ORDER BY L.Desde DESC
             `);
 

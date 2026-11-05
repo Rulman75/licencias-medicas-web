@@ -207,16 +207,16 @@ router.get('/funcionario/:rut', async (req, res) => {
                 LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 LEFT JOIN (
                     SELECT 
-                        CONVERT(varchar(50), NumeroLicencia) as NumeroLicencia,
+                        NumeroLicencia,
                         SUM(ISNULL(Monto, 0)) as SumaMonto,
                         SUM(ISNULL(DiasPagados, 0)) as SumaDias,
                         SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) = 'Aporte' THEN ISNULL(DiasPagados, 0) ELSE 0 END) as DiasAporte,
                         SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) <> 'Aporte' THEN ISNULL(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
                         COUNT(*) as CantPagos
                     FROM LIC_DETALLE_PAGO_ACTUAL
-                    GROUP BY CONVERT(varchar(50), NumeroLicencia)
+                    GROUP BY NumeroLicencia
                 ) DP ON L.NumeroLicencia = DP.NumeroLicencia
-                WHERE RTRIM(L.RutFuncionario) = @Rut
+                WHERE L.RutFuncionario = @Rut
                 ORDER BY L.Desde DESC
             `);
 
@@ -546,7 +546,7 @@ router.get('/licencia/:numero', async (req, res) => {
                     RTRIM(ISNULL(Banco, '')) as Banco,
                     RTRIM(ISNULL(cenco, '')) as Cenco
                 FROM LIC_DETALLE_PAGO_ACTUAL
-                WHERE RTRIM(CONVERT(varchar(50), NumeroLicencia)) = @Num
+                WHERE NumeroLicencia = @Num
                 ORDER BY Correlativo DESC
             `);
 
