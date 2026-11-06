@@ -160,10 +160,14 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                 SUM(CASE WHEN ISNULL(L.Maternal, 0) = 1 THEN 1 ELSE 0 END) as Maternales,
                 SUM(CASE WHEN F.CodUnidad < 600 THEN 1 ELSE 0 END) as SectorEducacion,
                 SUM(CASE WHEN F.CodUnidad >= 600 THEN 1 ELSE 0 END) as SectorSalud,
-                SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as TotalEstimado,
-                SUM(CAST(COALESCE(DP.SumaMonto, P.TotalPagado, 0) AS BIGINT)) as TotalPagado,
-                SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as LicenciasPagadas,
-                SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasPendientesPago
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as TotalEstimado,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as EstimadoConvenio,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as EstimadoReposo,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as TotalPagado,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as PagadoConvenio,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as PagadoReposo,
+                SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as LicenciasPagadas,
+                SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasPendientesPago
             FROM LIC_LICENCIA_ACTUAL L
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
@@ -190,8 +194,8 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                     SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) = 'Pago Directo' THEN 1 ELSE 0 END) as PagoDirecto,
                     SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo,
                     COUNT(*) as Total,
-                    SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as Estimado,
-                    SUM(CAST(COALESCE(DP.SumaMonto, P.TotalPagado, 0) AS BIGINT)) as Pagado
+                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as Estimado,
+                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as Pagado
                 FROM LIC_LICENCIA_ACTUAL L
                 LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 ${dpJoin}
@@ -206,8 +210,8 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                     SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) = 'Pago Directo' THEN 1 ELSE 0 END) as PagoDirecto,
                     SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo,
                     COUNT(*) as Total,
-                    SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as Estimado,
-                    SUM(CAST(COALESCE(DP.SumaMonto, P.TotalPagado, 0) AS BIGINT)) as Pagado
+                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as Estimado,
+                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as Pagado
                 FROM LIC_LICENCIA_ACTUAL L
                 LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 ${dpJoin}
@@ -223,8 +227,8 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                 RTRIM(ISNULL(S.Descripcion, 'SIN INFORMACIÓN')) as Institucion,
                 COUNT(*) as Cantidad,
                 SUM(CAST(ISNULL(L.NumDias, 0) AS BIGINT)) as Dias,
-                SUM(CAST(ISNULL(L.PagoEstimado, 0) AS BIGINT)) as Estimado,
-                SUM(CAST(COALESCE(DP.SumaMonto, P.TotalPagado, 0) AS BIGINT)) as Pagado
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as Estimado,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as Pagado
             FROM LIC_LICENCIA_ACTUAL L
             INNER JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             INNER JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
@@ -335,7 +339,11 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                 SectorEducacion: Number(kpisRow.SectorEducacion || 0),
                 SectorSalud: Number(kpisRow.SectorSalud || 0),
                 TotalEstimado: Number(kpisRow.TotalEstimado || 0),
+                EstimadoConvenio: Number(kpisRow.EstimadoConvenio || 0),
+                EstimadoReposo: Number(kpisRow.EstimadoReposo || 0),
                 TotalPagado: Number(kpisRow.TotalPagado || 0),
+                PagadoConvenio: Number(kpisRow.PagadoConvenio || 0),
+                PagadoReposo: Number(kpisRow.PagadoReposo || 0),
                 LicenciasPagadas: Number(kpisRow.LicenciasPagadas || 0),
                 LicenciasPendientesPago: Number(kpisRow.LicenciasPendientesPago || 0),
                 cheques: {
@@ -380,17 +388,27 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                     SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as LicenciasPagadas,
                     SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasSinPago,
                     SUM(CASE WHEN COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasPorCobrarSalud,
+                    SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) > COALESCE(L.PagoEstimado, 0) AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasSobrepago,
                     SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 THEN 1 ELSE 0 END) as LicenciasRechazadas,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.MontoSalud, 0) > 0 THEN 1 ELSE 0 END) as FalsosRechazosPagadosCant,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.MontoSalud, 0) > 0 AND COALESCE(DP.MontoDescuentoFunc, 0) > 0 THEN 1 ELSE 0 END) as FalsosRechazosDobleCobroCant,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND (L.Observacion_Compin LIKE '%Autorizada%' OR L.Observacion_Compin LIKE '%Ampliada%') THEN 1 ELSE 0 END) as FalsosRechazosCompinCant,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.MontoSalud, 0) = 0 AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as RechazadasRecuperadasDescCant,
                     SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND (COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 OR COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0)) AND RTRIM(ISNULL(F.vigencia, '')) = 'S' THEN 1 ELSE 0 END) as RechazadasRecuperablesCant,
                     SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND (COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 OR COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0)) AND RTRIM(ISNULL(F.vigencia, '')) <> 'S' THEN 1 ELSE 0 END) as RechazadasIncobrablesCant,
                     SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) >= COALESCE(L.PagoEstimado, 0) THEN 1 ELSE 0 END) as RechazadasRecuperadasCant,
                     SUM(CASE WHEN ISNULL(L.regularizado, 0) = 1 THEN 1 ELSE 0 END) as LicenciasReducidas,
                     SUM(COALESCE(DP.DiasSubsidio, P.NumDiasPagados, 0)) as DiasSubsidio,
                     SUM(COALESCE(DP.DiasAporte, 0)) as DiasAporte,
+                    SUM(COALESCE(DP.DiasDescuento, 0)) as DiasDescuento,
                     SUM(CAST(COALESCE(L.PagoEstimado, 0) AS BIGINT)) as TotalEstimado,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 THEN COALESCE(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as EstimadoNoRechazado,
                     SUM(CAST(COALESCE(DP.SumaMonto, P.TotalPagado, 0) AS BIGINT)) as TotalPagado,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as PagadoNoRechazado,
                     SUM(CAST(COALESCE(DP.MontoSubsidio, P.TotalPagado, 0) AS BIGINT)) as PagadoSubsidio,
                     SUM(CAST(COALESCE(DP.MontoAporte, 0) AS BIGINT)) as PagadoAporte,
+                    SUM(CAST(COALESCE(DP.MontoSalud, P.TotalPagado, 0) AS BIGINT)) as PagadoSaludTotal,
+                    SUM(CAST(COALESCE(DP.MontoDescuentoFunc, 0) AS BIGINT)) as PagadoDescuentoFunc,
                     SUM(CAST(
                         CASE 
                             WHEN COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND ISNULL(L.Rechazo, 0) = 0
@@ -398,6 +416,13 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                             ELSE 0
                         END AS BIGINT
                     )) as FaltaPorCobrar,
+                    SUM(CAST(
+                        CASE 
+                            WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) > COALESCE(L.PagoEstimado, 0) AND ISNULL(L.Rechazo, 0) = 0
+                            THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) - COALESCE(L.PagoEstimado, 0)
+                            ELSE 0
+                        END AS BIGINT
+                    )) as ExcedenteSobreEstimado,
                     SUM(CAST(
                         CASE
                             WHEN ISNULL(L.Rechazo, 0) = 1 THEN COALESCE(L.PagoEstimado, 0)
@@ -423,7 +448,19 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                             WHEN ISNULL(L.Rechazo, 0) = 1 THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0)
                             ELSE 0
                         END AS BIGINT
-                    )) as MontoRechazadoRecuperado
+                    )) as MontoRechazadoRecuperado,
+                    SUM(CAST(
+                        CASE
+                            WHEN ISNULL(L.Rechazo, 0) = 1 THEN COALESCE(DP.MontoSalud, 0)
+                            ELSE 0
+                        END AS BIGINT
+                    )) as MontoFalsoRechazoSalud,
+                    SUM(CAST(
+                        CASE
+                            WHEN ISNULL(L.Rechazo, 0) = 1 THEN COALESCE(DP.MontoDescuentoFunc, 0)
+                            ELSE 0
+                        END AS BIGINT
+                    )) as MontoRechazadoDescuentoFunc
                 FROM LIC_LICENCIA_ACTUAL L
                 LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
                 LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
@@ -432,9 +469,12 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                         NumeroLicencia,
                         SUM(COALESCE(Monto, 0)) as SumaMonto,
                         SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoAporte,
-                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSalud,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) IN ('Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoDescuentoFunc,
                         SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasAporte,
-                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) IN ('Descuento', 'Devolucion') THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasDescuento,
                         COUNT(*) as CantPagos
                     FROM LIC_DETALLE_PAGO_ACTUAL
                     GROUP BY NumeroLicencia
@@ -466,22 +506,35 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
             LicenciasPagadas: 0,
             LicenciasSinPago: 0,
             LicenciasPorCobrarSalud: 0,
+            LicenciasSobrepago: 0,
             LicenciasRechazadas: 0,
+            FalsosRechazosPagadosCant: 0,
+            FalsosRechazosDobleCobroCant: 0,
+            FalsosRechazosCompinCant: 0,
+            RechazadasRecuperadasDescCant: 0,
             RechazadasRecuperablesCant: 0,
             RechazadasIncobrablesCant: 0,
             RechazadasRecuperadasCant: 0,
             LicenciasReducidas: 0,
             DiasSubsidio: 0,
             DiasAporte: 0,
+            DiasDescuento: 0,
             TotalEstimado: 0,
+            EstimadoNoRechazado: 0,
             TotalPagado: 0,
+            PagadoNoRechazado: 0,
             PagadoSubsidio: 0,
             PagadoAporte: 0,
+            PagadoSaludTotal: 0,
+            PagadoDescuentoFunc: 0,
             FaltaPorCobrar: 0,
+            ExcedenteSobreEstimado: 0,
             MontoRechazado: 0,
             MontoRechazadoRecuperable: 0,
             MontoRechazadoIncobrable: 0,
             MontoRechazadoRecuperado: 0,
+            MontoFalsoRechazoSalud: 0,
+            MontoRechazadoDescuentoFunc: 0,
             FaltaPorCobrarTotal: 0
         };
 
@@ -507,22 +560,35 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                 LicenciasPagadas: licPag,
                 LicenciasSinPago: Number(r.LicenciasSinPago || 0),
                 LicenciasPorCobrarSalud: Number(r.LicenciasPorCobrarSalud || 0),
+                LicenciasSobrepago: Number(r.LicenciasSobrepago || 0),
                 LicenciasRechazadas: licRech,
+                FalsosRechazosPagadosCant: Number(r.FalsosRechazosPagadosCant || 0),
+                FalsosRechazosDobleCobroCant: Number(r.FalsosRechazosDobleCobroCant || 0),
+                FalsosRechazosCompinCant: Number(r.FalsosRechazosCompinCant || 0),
+                RechazadasRecuperadasDescCant: Number(r.RechazadasRecuperadasDescCant || 0),
                 RechazadasRecuperablesCant: Number(r.RechazadasRecuperablesCant || 0),
                 RechazadasIncobrablesCant: Number(r.RechazadasIncobrablesCant || 0),
                 RechazadasRecuperadasCant: Number(r.RechazadasRecuperadasCant || 0),
                 LicenciasReducidas: Number(r.LicenciasReducidas || 0),
                 DiasSubsidio: Number(r.DiasSubsidio || 0),
                 DiasAporte: Number(r.DiasAporte || 0),
+                DiasDescuento: Number(r.DiasDescuento || 0),
                 TotalEstimado: est,
+                EstimadoNoRechazado: Number(r.EstimadoNoRechazado || 0),
                 TotalPagado: pag,
+                PagadoNoRechazado: Number(r.PagadoNoRechazado || 0),
                 PagadoSubsidio: Number(r.PagadoSubsidio || 0),
                 PagadoAporte: Number(r.PagadoAporte || 0),
+                PagadoSaludTotal: Number(r.PagadoSaludTotal || 0),
+                PagadoDescuentoFunc: Number(r.PagadoDescuentoFunc || 0),
                 FaltaPorCobrar: falta,
+                ExcedenteSobreEstimado: Number(r.ExcedenteSobreEstimado || 0),
                 MontoRechazado: Number(r.MontoRechazado || 0),
                 MontoRechazadoRecuperable: mRecup,
                 MontoRechazadoIncobrable: mIncob,
                 MontoRechazadoRecuperado: Number(r.MontoRechazadoRecuperado || 0),
+                MontoFalsoRechazoSalud: Number(r.MontoFalsoRechazoSalud || 0),
+                MontoRechazadoDescuentoFunc: Number(r.MontoRechazadoDescuentoFunc || 0),
                 FaltaPorCobrarTotal: falta + mRecup + mIncob,
                 PorcentajePago: est > 0 ? Number(((pag / est) * 100).toFixed(1)) : 0,
                 PorcentajeCobertura: totalLic > 0 ? Number(((licPag / totalLic) * 100).toFixed(1)) : 0
@@ -530,30 +596,11 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
 
             meses.push(rowObj);
 
-            totales.TotalLicencias += rowObj.TotalLicencias;
-            totales.TotalFuncionarios += rowObj.TotalFuncionarios;
-            totales.TotalDias += rowObj.TotalDias;
-            totales.TotalDiasAut += rowObj.TotalDiasAut;
-            totales.LicenciasPagadas += rowObj.LicenciasPagadas;
-            totales.LicenciasSinPago += rowObj.LicenciasSinPago;
-            totales.LicenciasPorCobrarSalud += rowObj.LicenciasPorCobrarSalud;
-            totales.LicenciasRechazadas += rowObj.LicenciasRechazadas;
-            totales.RechazadasRecuperablesCant += rowObj.RechazadasRecuperablesCant;
-            totales.RechazadasIncobrablesCant += rowObj.RechazadasIncobrablesCant;
-            totales.RechazadasRecuperadasCant += rowObj.RechazadasRecuperadasCant;
-            totales.LicenciasReducidas += rowObj.LicenciasReducidas;
-            totales.DiasSubsidio += rowObj.DiasSubsidio;
-            totales.DiasAporte += rowObj.DiasAporte;
-            totales.TotalEstimado += rowObj.TotalEstimado;
-            totales.TotalPagado += rowObj.TotalPagado;
-            totales.PagadoSubsidio += rowObj.PagadoSubsidio;
-            totales.PagadoAporte += rowObj.PagadoAporte;
-            totales.FaltaPorCobrar += rowObj.FaltaPorCobrar;
-            totales.MontoRechazado += rowObj.MontoRechazado;
-            totales.MontoRechazadoRecuperable += rowObj.MontoRechazadoRecuperable;
-            totales.MontoRechazadoIncobrable += rowObj.MontoRechazadoIncobrable;
-            totales.MontoRechazadoRecuperado += rowObj.MontoRechazadoRecuperado;
-            totales.FaltaPorCobrarTotal += rowObj.FaltaPorCobrarTotal;
+            for (const k of Object.keys(totales)) {
+                if (typeof rowObj[k] === 'number') {
+                    totales[k] += rowObj[k];
+                }
+            }
         }
 
         totales.PorcentajePago = totales.TotalEstimado > 0
@@ -613,10 +660,13 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                 COALESCE(L.DiasAutorizados, 0) as DiasAutorizados,
                 COALESCE(DP.DiasSubsidio, P.NumDiasPagados, 0) as DiasSubsidio,
                 COALESCE(DP.DiasAporte, 0) as DiasAporte,
+                COALESCE(DP.DiasDescuento, 0) as DiasDescuento,
                 COALESCE(L.PagoEstimado, 0) as PagoEstimado,
                 COALESCE(DP.SumaMonto, P.TotalPagado, 0) as MontoPagado,
                 COALESCE(DP.MontoSubsidio, P.TotalPagado, 0) as PagadoSubsidio,
                 COALESCE(DP.MontoAporte, 0) as PagadoAporte,
+                COALESCE(DP.MontoSalud, P.TotalPagado, 0) as PagadoSalud,
+                COALESCE(DP.MontoDescuentoFunc, 0) as PagadoDescuento,
                 CASE 
                     WHEN COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND ISNULL(L.Rechazo, 0) = 0
                     THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
@@ -644,9 +694,12 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                     NumeroLicencia,
                     SUM(COALESCE(Monto, 0)) as SumaMonto,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoAporte,
-                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSalud,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) IN ('Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoDescuentoFunc,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasAporte,
-                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) <> 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) IN ('Descuento', 'Devolucion') THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasDescuento,
                     MAX(FechaDepCtaCte) as FechaPagoRaw,
                     COUNT(*) as CantPagos
                 FROM LIC_DETALLE_PAGO_ACTUAL
@@ -673,23 +726,41 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
             const esRechazada = Boolean(r.Rechazo);
             const esVigente = String(r.Vigencia || '').toUpperCase() === 'S';
             const pagado = Number(r.MontoPagado || 0);
+            const pagadoSalud = Number(r.PagadoSalud || 0);
+            const pagadoDesc = Number(r.PagadoDescuento || 0);
             const estimado = Number(r.PagoEstimado || 0);
             const tieneSaldoPendiente = pagado === 0 || estimado > pagado;
+            const obsCompin = String(r.Observacion_Compin || '');
+            const compinAutorizada = /autorizada|ampliada/i.test(obsCompin);
+            const esFalsoRechazoPagado = esRechazada && pagadoSalud > 0;
+            const esDobleCobro = esRechazada && pagadoSalud > 0 && pagadoDesc > 0;
+            const esFalsoRechazoCompin = esRechazada && compinAutorizada;
 
             let escenarioCobro = 'PAGADA';
             let situacionCobroLabel = 'Pagada / Recuperada';
             if (esRechazada) {
-                if (tieneSaldoPendiente) {
+                if (esDobleCobro) {
+                    escenarioCobro = 'FALSO_RECHAZO_PAGADO';
+                    situacionCobroLabel = 'Falso Rechazo (Pagó Salud + Desc. Funcionario)';
+                } else if (esFalsoRechazoPagado) {
+                    escenarioCobro = 'FALSO_RECHAZO_PAGADO';
+                    situacionCobroLabel = 'Falso Rechazo (Pagado por Salud en BCI)';
+                } else if (esFalsoRechazoCompin && pagado === 0) {
+                    escenarioCobro = 'RECHAZADA_RECUPERABLE';
+                    situacionCobroLabel = 'Falso Rechazo (Autorizada en COMPIN - Sin Pago)';
+                } else if (tieneSaldoPendiente) {
                     if (esVigente) {
                         escenarioCobro = 'RECHAZADA_RECUPERABLE';
-                        situacionCobroLabel = 'Rechazada Recuperable (Vigente - Desc. Remun.)';
+                        situacionCobroLabel = pagadoDesc > 0
+                            ? 'Rechazada en Descuento Parcial (Vigente)'
+                            : 'Rechazada Recuperable (Vigente - Desc. Remun.)';
                     } else {
                         escenarioCobro = 'RECHAZADA_INCOBRABLE';
                         situacionCobroLabel = 'Rechazada Incobrable (No Vigente)';
                     }
                 } else {
                     escenarioCobro = 'RECHAZADA_RECUPERADA';
-                    situacionCobroLabel = 'Rechazada Ya Recuperada';
+                    situacionCobroLabel = 'Rechazada Recuperada (Descuento / Devolución)';
                 }
             } else if (estimado > pagado) {
                 escenarioCobro = 'POR_COBRAR_SALUD';
@@ -703,6 +774,9 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                 ...r,
                 Vigencia: esVigente ? 'S' : 'N',
                 VigenciaLabel: esVigente ? 'Vigente' : 'No Vigente',
+                EsFalsoRechazoPagado: esFalsoRechazoPagado,
+                EsDobleCobro: esDobleCobro,
+                EsFalsoRechazoCompin: esFalsoRechazoCompin,
                 EscenarioCobro: escenarioCobro,
                 SituacionCobroLabel: situacionCobroLabel,
                 FechaPago: fechaPagoStr,

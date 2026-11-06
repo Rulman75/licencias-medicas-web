@@ -29,7 +29,11 @@ interface DashboardData {
   SectorEducacion: number;
   SectorSalud: number;
   TotalEstimado: number;
+  EstimadoConvenio?: number;
+  EstimadoReposo?: number;
   TotalPagado: number;
+  PagadoConvenio?: number;
+  PagadoReposo?: number;
   LicenciasPagadas: number;
   LicenciasPendientesPago: number;
   cheques: {
@@ -358,21 +362,33 @@ export default function Inicio() {
               </div>
             </div>
 
-            {/* BLOQUE 2: Resumen Financiero y Recupero de Subsidios */}
+            {/* BLOQUE 2: Resumen Financiero y Recupero de Subsidios (Excluye Pago Directo) */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
               {/* Subsidio Estimado */}
               <div className="bg-white rounded-xl shadow-sm p-5 border border-[#e2e8f0] flex flex-col justify-between">
                 <div>
-                  <span className="text-xs font-bold text-[#64748b] uppercase">
-                    Subsidio Estimado Total
-                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-[#64748b] uppercase">
+                      Subsidio Estimado (CMDS)
+                    </span>
+                    <span className="text-[10px] font-semibold bg-sky-50 text-[#016098] px-2 py-0.5 rounded border border-sky-200">
+                      Sin Pago Directo
+                    </span>
+                  </div>
                   <p className="text-2xl font-black text-[#016098] mt-1">
                     {formatCLP(stats.TotalEstimado)}
                   </p>
                 </div>
-                <p className="text-xs text-[#64748b] mt-3">
-                  Proyección base sobre {stats.TotalRegistros.toLocaleString('es-CL')} licencias del periodo
-                </p>
+                <div className="mt-3 pt-2 border-t border-slate-100 text-[11px] text-[#475569] space-y-0.5">
+                  <div className="flex justify-between">
+                    <span>• Convenio ({stats.Convenio.toLocaleString('es-CL')} lic.):</span>
+                    <b className="text-[#016098]">{formatCLP(stats.EstimadoConvenio || 0)}</b>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>• Órdenes Reposo ({stats.Reposo.toLocaleString('es-CL')} lic.):</span>
+                    <b className="text-amber-700">{formatCLP(stats.EstimadoReposo || 0)}</b>
+                  </div>
+                </div>
               </div>
 
               {/* Total Recuperado / Pagado */}
@@ -390,16 +406,15 @@ export default function Inicio() {
                     {formatCLP(stats.TotalPagado)}
                   </p>
                 </div>
-                <div className="mt-3">
-                  <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
-                    <div
-                      className="bg-emerald-500 h-full rounded-full"
-                      style={{ width: `${Math.min(100, tasaRecupero)}%` }}
-                    />
+                <div className="mt-3 pt-2 border-t border-slate-100 text-[11px] text-[#475569] space-y-0.5">
+                  <div className="flex justify-between">
+                    <span>• Convenio:</span>
+                    <b className="text-emerald-700">{formatCLP(stats.PagadoConvenio || 0)}</b>
                   </div>
-                  <p className="text-[11px] text-[#64748b] mt-1">
-                    {stats.LicenciasPagadas.toLocaleString('es-CL')} licencias con pago registrado
-                  </p>
+                  <div className="flex justify-between">
+                    <span>• Órdenes Reposo:</span>
+                    <b className="text-emerald-700">{formatCLP(stats.PagadoReposo || 0)}</b>
+                  </div>
                 </div>
               </div>
 
@@ -417,7 +432,7 @@ export default function Inicio() {
                   <strong className="text-[#1e293b]">
                     {stats.LicenciasPendientesPago.toLocaleString('es-CL')}
                   </strong>{' '}
-                  licencias activas pendientes de pago
+                  licencias (Convenio + Reposo) en $0 sin rechazo
                 </p>
               </div>
 
@@ -536,10 +551,10 @@ export default function Inicio() {
                 <div className="pt-4 border-t border-[#e2e8f0]">
                   <div className="flex justify-between text-xs font-bold mb-1.5">
                     <span className="text-[#016098]">
-                      Educación: {stats.SectorEducacion.toLocaleString('es-CL')} ({pctEducacion}%)
+                      Sector Educación: {stats.SectorEducacion.toLocaleString('es-CL')} ({pctEducacion}%)
                     </span>
                     <span className="text-[#39BABD]">
-                      Salud/Adm: {stats.SectorSalud.toLocaleString('es-CL')} ({pctSalud}%)
+                      Sector Salud/Adm: {stats.SectorSalud.toLocaleString('es-CL')} ({pctSalud}%)
                     </span>
                   </div>
                   <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden flex">
@@ -679,7 +694,7 @@ export default function Inicio() {
                       <th className="py-3 px-3">RUT</th>
                       <th className="py-3 px-3">Funcionario</th>
                       <th className="py-3 px-3">Establecimiento</th>
-                      <th className="py-3 px-3">Salud</th>
+                      <th className="py-3 px-3">Inst. de Salud</th>
                       <th className="py-3 px-3">Desde / Hasta</th>
                       <th className="py-3 px-2 text-center">Días</th>
                       <th className="py-3 px-3">Estado</th>

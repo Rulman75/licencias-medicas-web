@@ -23,22 +23,35 @@ interface MesConvenioRow {
   LicenciasPagadas: number;
   LicenciasSinPago: number;
   LicenciasPorCobrarSalud: number;
+  LicenciasSobrepago: number;
   LicenciasRechazadas: number;
+  FalsosRechazosPagadosCant: number;
+  FalsosRechazosDobleCobroCant: number;
+  FalsosRechazosCompinCant: number;
+  RechazadasRecuperadasDescCant: number;
   RechazadasRecuperablesCant: number;
   RechazadasIncobrablesCant: number;
   RechazadasRecuperadasCant: number;
   LicenciasReducidas: number;
   DiasSubsidio: number;
   DiasAporte: number;
+  DiasDescuento: number;
   TotalEstimado: number;
+  EstimadoNoRechazado: number;
   TotalPagado: number;
+  PagadoNoRechazado: number;
   PagadoSubsidio: number;
   PagadoAporte: number;
+  PagadoSaludTotal: number;
+  PagadoDescuentoFunc: number;
   FaltaPorCobrar: number;
+  ExcedenteSobreEstimado: number;
   MontoRechazado: number;
   MontoRechazadoRecuperable: number;
   MontoRechazadoIncobrable: number;
   MontoRechazadoRecuperado: number;
+  MontoFalsoRechazoSalud: number;
+  MontoRechazadoDescuentoFunc: number;
   FaltaPorCobrarTotal: number;
   PorcentajePago: number;
   PorcentajeCobertura: number;
@@ -50,9 +63,26 @@ type FiltroDetalleTipo =
   | 'sin-pago'
   | 'pagadas'
   | 'rechazadas'
+  | 'falso-rechazo-salud'
+  | 'falso-rechazo-doble'
+  | 'falso-rechazo-compin'
   | 'rech-recuperables'
   | 'rech-incobrables'
   | 'rech-recuperadas';
+
+const ETIQUETAS_FILTRO: Record<FiltroDetalleTipo, string> = {
+  'todas': 'Todas las Licencias del Período',
+  'por-cobrar': 'Pendientes por Cobrar a Instituciones de Salud (No Rechazadas)',
+  'sin-pago': 'Licencias No Rechazadas en $0 (Sin Pago de Inst. de Salud aún)',
+  'pagadas': 'Licencias con Pago / Recupero Registrado',
+  'rechazadas': 'Todas las Licencias Marcadas como Rechazadas',
+  'falso-rechazo-salud': '⚠️ Falsos Rechazos: Marcadas Rechazadas pero Pagadas por Inst. de Salud (BCI)',
+  'falso-rechazo-doble': '🚨 Doble Cobro: Pagadas por Inst. de Salud y además con Descuento al Funcionario',
+  'falso-rechazo-compin': '✅ Falsos Rechazos: Observación COMPIN dice "Autorizada / Ampliada"',
+  'rech-recuperables': 'Rechazadas Recuperables (Funcionario Vigente — Descuento por Remuneraciones)',
+  'rech-incobrables': 'Rechazadas Incobrables (Funcionario No Vigente / Finiquitado)',
+  'rech-recuperadas': 'Rechazadas Ya Recuperadas (Descuento por Planilla / Devolución)'
+};
 
 interface ControlConvenioMensualProps {
   initialYear?: string;
@@ -61,19 +91,16 @@ interface ControlConvenioMensualProps {
 export default function ControlConvenioMensual({ initialYear }: ControlConvenioMensualProps) {
   const defaultYear = initialYear && initialYear !== '' ? initialYear : String(new Date().getFullYear());
   const [anio, setAnio] = useState<string>(defaultYear);
-  const [mesSeleccionado, setMesSeleccionado] = useState<number>(0); // 0 = Acumulado Anual (Todos los meses)
-  // Por defecto usamos 'desde' (Fecha Inicio Reposo) para cuadrar con el tarjetón superior del Dashboard
+  const [mesSeleccionado, setMesSeleccionado] = useState<number>(0); // 0 = Acumulado Anual
   const [criterio, setCriterio] = useState<'recepcion' | 'desde'>('desde');
   const [sector, setSector] = useState<string>('');
+  const [vistaInferior, setVistaInferior] = useState<'tabla' | 'grafico'>('tabla');
 
   const [mesesData, setMesesData] = useState<MesConvenioRow[]>([]);
   const [totalesAnuales, setTotalesAnuales] = useState<any>(null);
   const [cargando, setCargando] = useState<boolean>(false);
 
-  // Modal de desglose de Saldos por Cobrar y Licencias Rechazadas (Recuperables vs Incobrables)
-  const [mostrarModalCobro, setMostrarModalCobro] = useState<boolean>(false);
-
-  // Estado del Detalle de Licencias
+  // Modal de Detalle de Licencias (Se abre en ventana modal centrada para no perderse en la página)
   const [mostrarDetalle, setMostrarDetalle] = useState<boolean>(false);
   const [mesDetalle, setMesDetalle] = useState<number>(0);
   const [registrosDetalle, setRegistrosDetalle] = useState<any[]>([]);
@@ -123,13 +150,18 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
     setMostrarDetalle(false);
   }, [anio, criterio, sector]);
 
-  const abrirDetalleMes = async (mesNum: number, filtroInicial?: FiltroDetalleTipo) => {
-    setMesSeleccionado(mesNum);
-    setMesDetalle(mesNum);
-    if (filtroInicial) {
-      setFiltroEstadoDet(filtroInicial);
-    }
+  // Abre el modal de detalle cargando el mes/año solicitado y posicionando el filtro elegido
+  const abrirModalDetalle = async (mesNum: number, filtroInicial: FiltroDetalleTipo = 'todas') => {
+    setFiltroEstadoDet(filtroInicial);
+    setBusquedaDet('');
     setMostrarDetalle(true);
+
+    // Si ya tenemos cargado el mismo mes/año, no recargamos de nuevo innecesariamente
+    if (registrosDetalle.length > 0 && mesDetalle === mesNum) {
+      return;
+    }
+
+    setMesDetalle(mesNum);
     setCargandoDetalle(true);
     try {
       const res = await axios.get('/api/dashboard/convenio-mensual/detalle', {
@@ -150,7 +182,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
     }
   };
 
-  // Datos activos para las tarjetas KPI superiores (Mes seleccionado o Total Anual)
+  // Datos activos para los indicadores superiores (Mes seleccionado o Total Anual)
   const kpiActivo =
     mesSeleccionado > 0
       ? mesesData.find(m => m.Mes === mesSeleccionado) || totalesAnuales
@@ -159,71 +191,43 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
   const tituloPeriodoActivo =
     mesSeleccionado > 0
       ? `${mesesData.find(m => m.Mes === mesSeleccionado)?.MesNombre || ''} ${anio}`
-      : `Acumulado Anual ${anio}`;
+      : `Año Completo ${anio}`;
 
   // Exportar tabla resumen mensual a Excel
   const exportarResumenExcel = () => {
     if (mesesData.length === 0) return;
-    const rows = mesesData.map(m => ({
+    const armarFila = (m: any, nombreMes: string) => ({
       'Año': anio,
-      'Mes': m.MesNombre,
+      'Mes': nombreMes,
       'Criterio Fecha': criterio === 'recepcion' ? 'Mes Recepción (Tramitadas)' : 'Mes Inicio Reposo (Desde)',
       'Licencias Convenio Tramitadas': m.TotalLicencias,
       'Licencias con Pago': m.LicenciasPagadas,
       'Licencias Sin Pago ($0 No Rech.)': m.LicenciasSinPago,
-      'Licencias Por Cobrar Salud': m.LicenciasPorCobrarSalud,
+      'Licencias Por Cobrar a Inst. de Salud': m.LicenciasPorCobrarSalud,
       'Licencias Rechazadas (Total)': m.LicenciasRechazadas,
+      'Falsos Rechazos (Pagados por Inst. de Salud)': m.FalsosRechazosPagadosCant,
+      'Falsos Rechazos con Doble Cobro (Inst. Salud + Desc.)': m.FalsosRechazosDobleCobroCant,
+      'Falsos Rechazos (COMPIN Autorizada)': m.FalsosRechazosCompinCant,
       'Rech. Recuperables (Vigentes)': m.RechazadasRecuperablesCant,
       'Rech. Incobrables (No Vigentes)': m.RechazadasIncobrablesCant,
-      'Rech. Ya Recuperadas': m.RechazadasRecuperadasCant,
-      'Licencias Reducidas': m.LicenciasReducidas,
-      'Días Otorgados': m.TotalDias,
-      'Días Autorizados': m.TotalDiasAut,
-      'Días Pag. Subsidio': m.DiasSubsidio,
-      'Días Pag. Aporte': m.DiasAporte,
+      'Rech. Recuperadas por Descuento/Devol.': m.RechazadasRecuperadasDescCant,
       'Pago Estimado Total ($)': m.TotalEstimado,
-      'Pago Recibido Total ($)': m.TotalPagado,
-      'Recibido Subsidio ($)': m.PagadoSubsidio,
-      'Recibido Aporte ($)': m.PagadoAporte,
-      'Falta por Cobrar Salud ($)': m.FaltaPorCobrar,
+      'Pago Estimado No Rechazadas ($)': m.EstimadoNoRechazado,
+      'Pago Estimado Rechazadas ($)': m.MontoRechazado,
+      'Pagado por Inst. de Salud Total (Sub+Apo) ($)': m.PagadoSaludTotal,
+      'Recibido Subsidio Inst. Salud ($)': m.PagadoSubsidio,
+      'Recibido Aporte Inst. Salud ($)': m.PagadoAporte,
+      'Recuperado por Descuento/Devol. Funcionario ($)': m.PagadoDescuentoFunc,
+      'Falta por Cobrar a Inst. de Salud ($)': m.FaltaPorCobrar,
       'Monto Rech. Recuperable Vigentes ($)': m.MontoRechazadoRecuperable,
       'Monto Rech. Incobrable No Vigentes ($)': m.MontoRechazadoIncobrable,
-      'Monto Rech. Ya Recuperado ($)': m.MontoRechazadoRecuperado,
-      'Monto Total Rechazadas ($)': m.MontoRechazado,
-      '% Pago Financiero': `${m.PorcentajePago}%`,
-      '% Cobertura Licencias Pagadas': `${m.PorcentajeCobertura}%`
-    }));
+      'Monto Pagado por Inst. de Salud en Falsos Rechazos ($)': m.MontoFalsoRechazoSalud,
+      '% Pago Financiero': `${m.PorcentajePago}%`
+    });
 
+    const rows = mesesData.map(m => armarFila(m, m.MesNombre));
     if (totalesAnuales) {
-      rows.push({
-        'Año': anio,
-        'Mes': 'TOTAL ANUAL',
-        'Criterio Fecha': criterio === 'recepcion' ? 'Mes Recepción (Tramitadas)' : 'Mes Inicio Reposo (Desde)',
-        'Licencias Convenio Tramitadas': totalesAnuales.TotalLicencias,
-        'Licencias con Pago': totalesAnuales.LicenciasPagadas,
-        'Licencias Sin Pago ($0 No Rech.)': totalesAnuales.LicenciasSinPago,
-        'Licencias Por Cobrar Salud': totalesAnuales.LicenciasPorCobrarSalud,
-        'Licencias Rechazadas (Total)': totalesAnuales.LicenciasRechazadas,
-        'Rech. Recuperables (Vigentes)': totalesAnuales.RechazadasRecuperablesCant,
-        'Rech. Incobrables (No Vigentes)': totalesAnuales.RechazadasIncobrablesCant,
-        'Rech. Ya Recuperadas': totalesAnuales.RechazadasRecuperadasCant,
-        'Licencias Reducidas': totalesAnuales.LicenciasReducidas,
-        'Días Otorgados': totalesAnuales.TotalDias,
-        'Días Autorizados': totalesAnuales.TotalDiasAut,
-        'Días Pag. Subsidio': totalesAnuales.DiasSubsidio,
-        'Días Pag. Aporte': totalesAnuales.DiasAporte,
-        'Pago Estimado Total ($)': totalesAnuales.TotalEstimado,
-        'Pago Recibido Total ($)': totalesAnuales.TotalPagado,
-        'Recibido Subsidio ($)': totalesAnuales.PagadoSubsidio,
-        'Recibido Aporte ($)': totalesAnuales.PagadoAporte,
-        'Falta por Cobrar Salud ($)': totalesAnuales.FaltaPorCobrar,
-        'Monto Rech. Recuperable Vigentes ($)': totalesAnuales.MontoRechazadoRecuperable,
-        'Monto Rech. Incobrable No Vigentes ($)': totalesAnuales.MontoRechazadoIncobrable,
-        'Monto Rech. Ya Recuperado ($)': totalesAnuales.MontoRechazadoRecuperado,
-        'Monto Total Rechazadas ($)': totalesAnuales.MontoRechazado,
-        '% Pago Financiero': `${totalesAnuales.PorcentajePago}%`,
-        '% Cobertura Licencias Pagadas': `${totalesAnuales.PorcentajeCobertura}%`
-      });
+      rows.push(armarFila(totalesAnuales, 'TOTAL ANUAL'));
     }
 
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -232,13 +236,448 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
     XLSX.writeFile(wb, `Control_Convenio_Mensual_${anio}.xlsx`);
   };
 
-  // Filtrar y ordenar el detalle de licencias
+  // Exportar Guía de Cuadratura a Excel (.xlsx)
+  const exportarGuiaCuadraturaExcel = () => {
+    if (!kpiActivo) return;
+    const hoy = new Date();
+    const fechaEmision = `${String(hoy.getDate()).padStart(2, '0')}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${hoy.getFullYear()}`;
+    const criterioTexto =
+      criterio === 'recepcion' ? 'Fecha Recepción (Tramitadas)' : 'Fecha Inicio Reposo (Desde)';
+    const sectorTexto =
+      sector === 'educacion'
+        ? 'Sector Educación'
+        : sector === 'salud'
+        ? 'Sector Salud (APS)'
+        : 'Todos (Educación + Salud APS)';
+    const noRechCant = Number(kpiActivo.TotalLicencias || 0) - Number(kpiActivo.LicenciasRechazadas || 0);
+    const saldadasRechCant =
+      Number(kpiActivo.LicenciasRechazadas || 0) -
+      Number(kpiActivo.RechazadasRecuperablesCant || 0) -
+      Number(kpiActivo.RechazadasIncobrablesCant || 0);
+
+    const filasGuia = [
+      {
+        'Sección': 'PARÁMETROS DEL REPORTE',
+        'Concepto / Indicador': 'Período Analizado',
+        'Cantidad Licencias': '',
+        'Monto ($)': '',
+        'Detalle / Explicación': tituloPeriodoActivo
+      },
+      {
+        'Sección': 'PARÁMETROS DEL REPORTE',
+        'Concepto / Indicador': 'Criterio de Fecha',
+        'Cantidad Licencias': '',
+        'Monto ($)': '',
+        'Detalle / Explicación': criterioTexto
+      },
+      {
+        'Sección': 'PARÁMETROS DEL REPORTE',
+        'Concepto / Indicador': 'Sector CMDS',
+        'Cantidad Licencias': '',
+        'Monto ($)': '',
+        'Detalle / Explicación': sectorTexto
+      },
+      {
+        'Sección': 'PARÁMETROS DEL REPORTE',
+        'Concepto / Indicador': 'Fecha de Emisión',
+        'Cantidad Licencias': '',
+        'Monto ($)': '',
+        'Detalle / Explicación': fechaEmision
+      },
+      {
+        'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
+        'Concepto / Indicador': 'TOTAL LICENCIAS CONVENIO DEL PERÍODO',
+        'Cantidad Licencias': Number(kpiActivo.TotalLicencias || 0),
+        'Monto ($)': Number(kpiActivo.TotalEstimado || 0),
+        'Detalle / Explicación': '100% del universo de licencias convenio (Válidas + Rechazadas)'
+      },
+      {
+        'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
+        'Concepto / Indicador': '1. Licencias Válidas / En Trámite (Sin marca de rechazo)',
+        'Cantidad Licencias': noRechCant,
+        'Monto ($)': Number(kpiActivo.EstimadoNoRechazado || 0),
+        'Detalle / Explicación': 'Licencias con Rechazo = 0 que deben ser pagadas por Inst. de Salud'
+      },
+      {
+        'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
+        'Concepto / Indicador': '   • Con pago recibido de Inst. de Salud (total o parcial)',
+        'Cantidad Licencias': noRechCant - Number(kpiActivo.LicenciasSinPago || 0),
+        'Monto ($)': Number(kpiActivo.PagadoNoRechazado || 0),
+        'Detalle / Explicación': 'Licencias válidas que ya registran abono de FONASA/ISAPRE'
+      },
+      {
+        'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
+        'Concepto / Indicador': '   • En $0 esperando pago de Inst. de Salud',
+        'Cantidad Licencias': Number(kpiActivo.LicenciasSinPago || 0),
+        'Monto ($)': '',
+        'Detalle / Explicación': 'Licencias válidas sin ningún pago registrado aún'
+      },
+      {
+        'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
+        'Concepto / Indicador': '   ↳ Total Válidas con saldo Falta por Cobrar a Inst. de Salud',
+        'Cantidad Licencias': Number(kpiActivo.LicenciasPorCobrarSalud || 0),
+        'Monto ($)': Number(kpiActivo.FaltaPorCobrar || 0),
+        'Detalle / Explicación': 'Suma de licencias en $0 más licencias con pago parcial menor al estimado'
+      },
+      {
+        'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
+        'Concepto / Indicador': '2. Licencias Marcadas como Rechazadas (Rechazo = 1)',
+        'Cantidad Licencias': Number(kpiActivo.LicenciasRechazadas || 0),
+        'Monto ($)': Number(kpiActivo.MontoRechazado || 0),
+        'Detalle / Explicación': 'Licencias marcadas con check de rechazo en el sistema'
+      },
+      {
+        'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
+        'Concepto / Indicador': '   • A. Recuperables por Remuneraciones (Funcionario Vigente)',
+        'Cantidad Licencias': Number(kpiActivo.RechazadasRecuperablesCant || 0),
+        'Monto ($)': Number(kpiActivo.MontoRechazadoRecuperable || 0),
+        'Detalle / Explicación': 'Funcionarios activos en CMDS (Vigencia = S) sujetos a descuento por planilla'
+      },
+      {
+        'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
+        'Concepto / Indicador': '   • B. Incobrables (Ex-Funcionario No Vigente / Finiquitado)',
+        'Cantidad Licencias': Number(kpiActivo.RechazadasIncobrablesCant || 0),
+        'Monto ($)': Number(kpiActivo.MontoRechazadoIncobrable || 0),
+        'Detalle / Explicación': 'Ex-funcionarios sin vínculo vigente (Vigencia <> S)'
+      },
+      {
+        'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
+        'Concepto / Indicador': '   • C/D. Licencias Rechazadas ya Saldadas (Descuento o Pago Inst. Salud)',
+        'Cantidad Licencias': saldadasRechCant,
+        'Monto ($)': Number(kpiActivo.MontoRechazadoRecuperado || 0),
+        'Detalle / Explicación': `Incluye ${kpiActivo.RechazadasRecuperadasDescCant} con descuento al funcionario y ${kpiActivo.FalsosRechazosPagadosCant} Falsos Rechazos pagados por Inst. de Salud`
+      },
+      {
+        'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
+        'Concepto / Indicador': 'Pago Estimado Total (Todas las licencias convenio)',
+        'Cantidad Licencias': Number(kpiActivo.TotalLicencias || 0),
+        'Monto ($)': Number(kpiActivo.TotalEstimado || 0),
+        'Detalle / Explicación': 'Proyección total sobre el universo de licencias convenio'
+      },
+      {
+        'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
+        'Concepto / Indicador': '(-) Menos Estimado de Licencias Rechazadas',
+        'Cantidad Licencias': Number(kpiActivo.LicenciasRechazadas || 0),
+        'Monto ($)': -Number(kpiActivo.MontoRechazado || 0),
+        'Detalle / Explicación': 'Se descuenta de la meta de cobro a Instituciones de Salud'
+      },
+      {
+        'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
+        'Concepto / Indicador': '(=) Meta Estimada a Cobrar a Inst. de Salud (No Rechazadas)',
+        'Cantidad Licencias': noRechCant,
+        'Monto ($)': Number(kpiActivo.EstimadoNoRechazado || 0),
+        'Detalle / Explicación': 'Monto esperado a recuperar desde FONASA / ISAPRE'
+      },
+      {
+        'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
+        'Concepto / Indicador': '   • Pagado por Inst. de Salud en licencias No Rechazadas',
+        'Cantidad Licencias': '',
+        'Monto ($)': Number(kpiActivo.PagadoNoRechazado || 0),
+        'Detalle / Explicación': 'Pagos BCI (Subsidio + Aporte) en licencias sin rechazo'
+      },
+      {
+        'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
+        'Concepto / Indicador': '   • (+) Pagado por Inst. de Salud en Falsos Rechazos',
+        'Cantidad Licencias': Number(kpiActivo.FalsosRechazosPagadosCant || 0),
+        'Monto ($)': Number(kpiActivo.MontoFalsoRechazoSalud || 0),
+        'Detalle / Explicación': `Licencias con Rechazo = 1 que igualmente fueron pagadas por Inst. de Salud (${kpiActivo.FalsosRechazosDobleCobroCant} con doble cobro)`
+      },
+      {
+        'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
+        'Concepto / Indicador': '(=) Total Pagado por Inst. de Salud (BCI = Subsidio + Aporte)',
+        'Cantidad Licencias': '',
+        'Monto ($)': Number(kpiActivo.PagadoSaludTotal || 0),
+        'Detalle / Explicación': `Subsidio: ${formatCLP(kpiActivo.PagadoSubsidio)} + Aporte: ${formatCLP(kpiActivo.PagadoAporte)}`
+      },
+      {
+        'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
+        'Concepto / Indicador': '   • Falta por Cobrar a Inst. de Salud (Saldo en No Rechazadas)',
+        'Cantidad Licencias': Number(kpiActivo.LicenciasPorCobrarSalud || 0),
+        'Monto ($)': Number(kpiActivo.FaltaPorCobrar || 0),
+        'Detalle / Explicación': 'Deuda pendiente por cobrar a FONASA / ISAPRE en licencias válidas'
+      },
+      {
+        'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
+        'Concepto / Indicador': 'Aparte — Recuperado por Descuento / Devolución a Funcionarios',
+        'Cantidad Licencias': Number(kpiActivo.RechazadasRecuperadasDescCant || 0),
+        'Monto ($)': Number(kpiActivo.PagadoDescuentoFunc || 0),
+        'Detalle / Explicación': 'Recuperado por planilla de remuneraciones (no se suma a pagos de Inst. de Salud)'
+      }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(filasGuia);
+    ws['!cols'] = [{ wch: 38 }, { wch: 56 }, { wch: 18 }, { wch: 20 }, { wch: 68 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Guia_Cuadratura');
+    XLSX.writeFile(wb, `Guia_Cuadratura_Convenio_${tituloPeriodoActivo.replace(/\s+/g, '_')}.xlsx`);
+  };
+
+  // Exportar / Imprimir Guía de Cuadratura en PDF
+  const exportarGuiaCuadraturaPDF = () => {
+    if (!kpiActivo) return;
+    const hoy = new Date();
+    const fechaEmision = `${String(hoy.getDate()).padStart(2, '0')}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${hoy.getFullYear()}`;
+    const criterioTexto =
+      criterio === 'recepcion' ? 'Fecha Recepción (Tramitadas)' : 'Fecha Inicio Reposo (Desde)';
+    const sectorTexto =
+      sector === 'educacion'
+        ? 'Sector Educación'
+        : sector === 'salud'
+        ? 'Sector Salud (APS)'
+        : 'Todos (Educación + Salud APS)';
+    const noRechCant = Number(kpiActivo.TotalLicencias || 0) - Number(kpiActivo.LicenciasRechazadas || 0);
+    const saldadasRechCant =
+      Number(kpiActivo.LicenciasRechazadas || 0) -
+      Number(kpiActivo.RechazadasRecuperablesCant || 0) -
+      Number(kpiActivo.RechazadasIncobrablesCant || 0);
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Guía de Cuadratura Licencias Convenio — ${tituloPeriodoActivo}</title>
+  <style>
+    @page { size: letter portrait; margin: 14mm; }
+    * { box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; }
+    body { margin: 0; color: #1e293b; font-size: 11px; line-height: 1.4; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #016098; padding-bottom: 10px; margin-bottom: 14px; }
+    .title { font-size: 16px; font-weight: 800; color: #016098; margin: 0 0 3px 0; text-transform: uppercase; }
+    .subtitle { font-size: 11px; color: #475569; margin: 0; }
+    .meta-box { text-align: right; font-size: 10px; color: #334155; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+    .kpi-card { border: 1px solid #cbd5e1; border-left: 4px solid #016098; border-radius: 8px; padding: 8px 10px; background: #f8fafc; }
+    .kpi-card.green { border-left-color: #059669; background: #ecfdf5; }
+    .kpi-card.amber { border-left-color: #d97706; background: #fffbeb; }
+    .kpi-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #475569; }
+    .kpi-val { font-size: 15px; font-weight: 800; color: #0f172a; margin: 3px 0; }
+    .kpi-sub { font-size: 9px; color: #475569; }
+    .section-title { font-size: 12px; font-weight: 800; color: #016098; text-transform: uppercase; margin: 12px 0 6px 0; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 10.5px; }
+    th { background: #016098; color: #ffffff; text-align: left; padding: 6px 8px; font-size: 10px; text-transform: uppercase; }
+    td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; }
+    tr.highlight { background: #f0f9ff; font-weight: 700; }
+    tr.highlight-green { background: #ecfdf5; font-weight: 700; color: #065f46; }
+    tr.highlight-rose { background: #fff1f2; font-weight: 700; color: #9f1239; }
+    tr.highlight-teal { background: #f0fdfa; font-weight: 700; color: #115e59; }
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+    .footer { margin-top: 16px; padding-top: 8px; border-top: 1px solid #cbd5e1; font-size: 9.5px; color: #64748b; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="title">Guía de Cuadratura — Control Licencias Médicas Convenio</div>
+      <p class="subtitle">Corporación Municipal de Desarrollo Social de Antofagasta (CMDS)</p>
+    </div>
+    <div class="meta-box">
+      <div><b>Período:</b> ${tituloPeriodoActivo}</div>
+      <div><b>Criterio:</b> ${criterioTexto}</div>
+      <div><b>Sector CMDS:</b> ${sectorTexto}</div>
+      <div><b>Fecha Emisión:</b> ${fechaEmision}</div>
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Total Licencias Convenio</div>
+      <div class="kpi-val">${Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')}</div>
+      <div class="kpi-sub">Válidas: <b>${noRechCant.toLocaleString('es-CL')}</b> | Rech.: <b>${Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')}</b></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Pago Estimado (No Rech.)</div>
+      <div class="kpi-val">${formatCLP(kpiActivo.EstimadoNoRechazado)}</div>
+      <div class="kpi-sub">+ Rech.: ${formatCLP(kpiActivo.MontoRechazado)} | Total: ${formatCLP(kpiActivo.TotalEstimado)}</div>
+    </div>
+    <div class="kpi-card green">
+      <div class="kpi-label">Pagado por Inst. de Salud</div>
+      <div class="kpi-val">${formatCLP(kpiActivo.PagadoSaludTotal)}</div>
+      <div class="kpi-sub">Sub: ${formatCLP(kpiActivo.PagadoSubsidio)} | Apo: ${formatCLP(kpiActivo.PagadoAporte)}</div>
+    </div>
+    <div class="kpi-card amber">
+      <div class="kpi-label">Falta Cobrar (Inst. Salud)</div>
+      <div class="kpi-val">${formatCLP(kpiActivo.FaltaPorCobrar)}</div>
+      <div class="kpi-sub">En $0: <b>${Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')}</b> | Con saldo: <b>${Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')}</b></div>
+    </div>
+  </div>
+
+  <div class="section-title">A. Composición del Universo de Licencias (Cantidades)</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Concepto / Agrupación</th>
+        <th class="text-right">Cantidad Licencias</th>
+        <th>Explicación Operativa</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="highlight">
+        <td>TOTAL UNIVERSO LICENCIAS CONVENIO</td>
+        <td class="text-right">${Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')} lic.</td>
+        <td>100% de las licencias convenio del período (Válidas + Rechazadas)</td>
+      </tr>
+      <tr class="highlight-green">
+        <td>1. Licencias Válidas / En Trámite (Sin marca de rechazo)</td>
+        <td class="text-right">${noRechCant.toLocaleString('es-CL')} lic.</td>
+        <td>Licencias con Rechazo = 0 que deben ser reembolsadas por FONASA / ISAPRE</td>
+      </tr>
+      <tr>
+        <td style="padding-left:22px;">• Con pago recibido de Inst. de Salud (total o parcial)</td>
+        <td class="text-right"><b>${(noRechCant - Number(kpiActivo.LicenciasSinPago || 0)).toLocaleString('es-CL')} lic.</b></td>
+        <td>Licencias válidas que ya registran pago de Subsidio y/o Aporte en BCI</td>
+      </tr>
+      <tr>
+        <td style="padding-left:22px;">• En $0 esperando pago de Inst. de Salud</td>
+        <td class="text-right"><b>${Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')} lic.</b></td>
+        <td>Licencias válidas sin ningún pago registrado aún</td>
+      </tr>
+      <tr>
+        <td style="padding-left:22px; color:#016098; font-weight:700;">↳ Total Válidas con saldo Falta por Cobrar a Inst. de Salud</td>
+        <td class="text-right" style="color:#016098; font-weight:700;">${Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic.</td>
+        <td>Suma de las licencias en $0 más las que tienen pago parcial inferior al estimado</td>
+      </tr>
+      <tr class="highlight-rose">
+        <td>2. Licencias Marcadas como Rechazadas (Rechazo = 1)</td>
+        <td class="text-right">${Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} lic.</td>
+        <td>Licencias con marca de rechazo en la base de datos</td>
+      </tr>
+      <tr>
+        <td style="padding-left:22px;">• A. Con saldo por descontar a Funcionario Vigente (Recuperables)</td>
+        <td class="text-right"><b>${Number(kpiActivo.RechazadasRecuperablesCant || 0).toLocaleString('es-CL')} lic.</b></td>
+        <td>Funcionarios activos en la Corporación (Vigencia = S): recuperables vía remuneraciones</td>
+      </tr>
+      <tr>
+        <td style="padding-left:22px;">• B. Con saldo de Ex-Funcionario No Vigente (Incobrables)</td>
+        <td class="text-right"><b>${Number(kpiActivo.RechazadasIncobrablesCant || 0).toLocaleString('es-CL')} lic.</b></td>
+        <td>Ex-funcionarios finiquitados / no vigentes (Vigencia &lt;&gt; S)</td>
+      </tr>
+      <tr>
+        <td style="padding-left:22px;">• C/D. Licencias Rechazadas ya Saldadas (Descuento Func. o Pago Inst. Salud)</td>
+        <td class="text-right"><b>${saldadasRechCant.toLocaleString('es-CL')} lic.</b></td>
+        <td>Incluye ${kpiActivo.RechazadasRecuperadasDescCant} con Descuento/Devolución aplicado y ${kpiActivo.FalsosRechazosPagadosCant} Falsos Rechazos pagados por Inst. de Salud</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="section-title">B. Cuadratura Financiera de Montos ($) — Fórmula de Conciliación</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Línea de Conciliación Financiera</th>
+        <th class="text-right">Monto ($)</th>
+        <th>Detalle / Origen del Monto</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Pago Estimado Total</b> (${Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')} licencias convenio)</td>
+        <td class="text-right"><b>${formatCLP(kpiActivo.TotalEstimado)}</b></td>
+        <td>Suma total del subsidio estimado en todas las licencias convenio</td>
+      </tr>
+      <tr class="highlight-rose">
+        <td>(-) Menos Estimado de Licencias Rechazadas (${Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} lic.)</td>
+        <td class="text-right">- ${formatCLP(kpiActivo.MontoRechazado)}</td>
+        <td>Se resta de la meta de cobro a Instituciones de Salud</td>
+      </tr>
+      <tr class="highlight">
+        <td>(=) Meta Estimada a Cobrar a Inst. de Salud (No Rechazadas)</td>
+        <td class="text-right">${formatCLP(kpiActivo.EstimadoNoRechazado)}</td>
+        <td>Meta real exigible a FONASA / ISAPRE sobre las ${noRechCant.toLocaleString('es-CL')} licencias válidas</td>
+      </tr>
+      <tr>
+        <td style="padding-left:22px;">• Pagado por Inst. de Salud en licencias No Rechazadas</td>
+        <td class="text-right"><b>${formatCLP(kpiActivo.PagadoNoRechazado)}</b></td>
+        <td>Ingresos BCI por Subsidio + Aporte en licencias válidas</td>
+      </tr>
+      <tr>
+        <td style="padding-left:22px;">• (+) Pagado por Inst. de Salud en Falsos Rechazos (${Number(kpiActivo.FalsosRechazosPagadosCant || 0)} lic.)</td>
+        <td class="text-right"><b>+ ${formatCLP(kpiActivo.MontoFalsoRechazoSalud)}</b></td>
+        <td>Licencias con Rechazo = 1 que igualmente fueron pagadas por Inst. de Salud (${kpiActivo.FalsosRechazosDobleCobroCant} con doble cobro)</td>
+      </tr>
+      <tr class="highlight-green">
+        <td>(=) Total Pagado por Inst. de Salud (BCI = Subsidio + Aporte)</td>
+        <td class="text-right">${formatCLP(kpiActivo.PagadoSaludTotal)}</td>
+        <td>Subsidio: ${formatCLP(kpiActivo.PagadoSubsidio)} + Aporte: ${formatCLP(kpiActivo.PagadoAporte)}</td>
+      </tr>
+      <tr>
+        <td style="padding-left:22px; color:#b45309; font-weight:700;">• Falta por Cobrar a Inst. de Salud (${Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic. válidas)</td>
+        <td class="text-right" style="color:#b45309; font-weight:700;">${formatCLP(kpiActivo.FaltaPorCobrar)}</td>
+        <td>Saldo pendiente de cobro en licencias no rechazadas</td>
+      </tr>
+      <tr class="highlight-teal">
+        <td>Aparte — Recuperado por Descuento / Devolución a Funcionarios (No se suma a Inst. Salud)</td>
+        <td class="text-right">${formatCLP(kpiActivo.PagadoDescuentoFunc)}</td>
+        <td>Recuperado por descuento de remuneraciones (${kpiActivo.RechazadasRecuperadasDescCant} lic. rechazadas)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="section-title">C. Resumen de Escenarios de Licencias Rechazadas (${Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} lic. · ${formatCLP(kpiActivo.MontoRechazado)})</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Escenario de Rechazo</th>
+        <th class="text-right">Licencias</th>
+        <th class="text-right">Monto ($)</th>
+        <th>Acción / Estado</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>A. Recuperables (Funcionarios Vigentes)</b></td>
+        <td class="text-right">${Number(kpiActivo.RechazadasRecuperablesCant || 0).toLocaleString('es-CL')}</td>
+        <td class="text-right"><b>${formatCLP(kpiActivo.MontoRechazadoRecuperable)}</b></td>
+        <td>Funcionarios activos en CMDS: descontar por remuneraciones</td>
+      </tr>
+      <tr>
+        <td><b>B. Incobrables (Ex-Funcionarios No Vigentes)</b></td>
+        <td class="text-right">${Number(kpiActivo.RechazadasIncobrablesCant || 0).toLocaleString('es-CL')}</td>
+        <td class="text-right"><b>${formatCLP(kpiActivo.MontoRechazadoIncobrable)}</b></td>
+        <td>Ex-funcionarios finiquitados: sin remuneración activa para descuento</td>
+      </tr>
+      <tr>
+        <td><b>C. Ya Recuperadas por Descuento / Devolución</b></td>
+        <td class="text-right">${Number(kpiActivo.RechazadasRecuperadasDescCant || 0).toLocaleString('es-CL')}</td>
+        <td class="text-right"><b>${formatCLP(kpiActivo.MontoRechazadoDescuentoFunc)}</b></td>
+        <td>Descuento por planilla ya aplicado al funcionario</td>
+      </tr>
+      <tr>
+        <td><b>D. ⚠️ Falsos Rechazos (Pagadas por Inst. de Salud)</b></td>
+        <td class="text-right">${Number(kpiActivo.FalsosRechazosPagadosCant || 0).toLocaleString('es-CL')}</td>
+        <td class="text-right"><b>${formatCLP(kpiActivo.MontoFalsoRechazoSalud)}</b></td>
+        <td>Pagadas en BCI (${kpiActivo.FalsosRechazosDobleCobroCant} con doble cobro y ${kpiActivo.FalsosRechazosCompinCant} autorizadas COMPIN)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <span>Sistema de Gestión y Control de Licencias Médicas — CMDS Antofagasta</span>
+    <span>Generado el ${fechaEmision}</span>
+  </div>
+  <script>
+    window.onload = function() { setTimeout(function() { window.print(); }, 250); };
+  </script>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank', 'width=980,height=820');
+    if (win) {
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+    }
+  };
+
+  // Filtrar y ordenar el detalle de licencias dentro del Modal
   const registrosDetalleFiltrados = registrosDetalle
     .filter(r => {
       if (filtroEstadoDet === 'por-cobrar' && !(Number(r.FaltaPorCobrar || 0) > 0 && !r.Rechazo)) return false;
       if (filtroEstadoDet === 'sin-pago' && !(Number(r.MontoPagado || 0) === 0 && !r.Rechazo)) return false;
       if (filtroEstadoDet === 'pagadas' && !(Number(r.MontoPagado || 0) > 0)) return false;
       if (filtroEstadoDet === 'rechazadas' && !r.Rechazo) return false;
+      if (filtroEstadoDet === 'falso-rechazo-salud' && !r.EsFalsoRechazoPagado) return false;
+      if (filtroEstadoDet === 'falso-rechazo-doble' && !r.EsDobleCobro) return false;
+      if (filtroEstadoDet === 'falso-rechazo-compin' && !r.EsFalsoRechazoCompin) return false;
       if (filtroEstadoDet === 'rech-recuperables' && r.EscenarioCobro !== 'RECHAZADA_RECUPERABLE') return false;
       if (filtroEstadoDet === 'rech-incobrables' && r.EscenarioCobro !== 'RECHAZADA_INCOBRABLE') return false;
       if (filtroEstadoDet === 'rech-recuperadas' && r.EscenarioCobro !== 'RECHAZADA_RECUPERADA') return false;
@@ -269,7 +708,15 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
       return ordenFechaDet === 'asc' ? fA.localeCompare(fB) : fB.localeCompare(fA);
     });
 
-  // Promedio de días de demora de pago en el detalle filtrado
+  // Totales rápidos del listado filtrado en el modal
+  const sumaEstimadoModal = registrosDetalleFiltrados.reduce((acc, r) => acc + Number(r.PagoEstimado || 0), 0);
+  const sumaSaludModal = registrosDetalleFiltrados.reduce((acc, r) => acc + Number(r.PagadoSalud || 0), 0);
+  const sumaDescModal = registrosDetalleFiltrados.reduce((acc, r) => acc + Number(r.PagadoDescuento || 0), 0);
+  const sumaPendModal = registrosDetalleFiltrados.reduce(
+    (acc, r) => acc + Number(r.SaldoPendiente ?? r.FaltaPorCobrar ?? 0),
+    0
+  );
+
   const pagadasConDemora = registrosDetalleFiltrados.filter(
     r => r.DiasDemoraPago !== null && r.DiasDemoraPago !== undefined && Number(r.MontoPagado || 0) > 0
   );
@@ -305,15 +752,19 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
         'Días Autorizados': r.DiasAutorizados,
         'Días Pag. Subsidio': r.DiasSubsidio,
         'Días Pag. Aporte': r.DiasAporte,
+        'Días Descuento Func.': r.DiasDescuento || 0,
         'Pago Estimado ($)': est,
-        'Monto Pagado Total ($)': pag,
-        'Pagado Subsidio ($)': r.PagadoSubsidio,
-        'Pagado Aporte ($)': r.PagadoAporte,
-        'Falta Cobrar Salud ($)': r.FaltaPorCobrar,
+        'Pagado por Inst. de Salud (Sub+Apo) ($)': r.PagadoSalud || 0,
+        'Pagado Subsidio Inst. Salud ($)': r.PagadoSubsidio,
+        'Pagado Aporte Inst. Salud ($)': r.PagadoAporte,
+        'Recuperado Descuento/Devol. Func. ($)': r.PagadoDescuento || 0,
+        'Monto Total Registrado ($)': pag,
+        'Falta Cobrar Inst. de Salud ($)': r.FaltaPorCobrar,
         'Saldo Pendiente Total ($)': r.SaldoPendiente,
         '% Pago': `${pct}%`,
-        'Cant. Pagos': r.CantidadPagos,
-        'Estado': r.Rechazo ? 'RECHAZADA' : r.Reducida ? 'REDUCIDA' : pag > 0 ? 'CON PAGO' : 'PENDIENTE COBRO',
+        'Check Rechazo BD': r.Rechazo ? 'SÍ (Rechazo=1)' : 'NO',
+        'Falso Rechazo (Pagó Inst. Salud)': r.EsFalsoRechazoPagado ? 'SÍ' : 'NO',
+        'Doble Cobro (Inst. Salud + Desc. Func.)': r.EsDobleCobro ? 'SÍ' : 'NO',
         'Situación de Cobro / Recuperación': r.SituacionCobroLabel || '',
         'Observación Compin': r.Observacion_Compin || '',
         'Obs. Apelación': r.Obser_apelacion || '',
@@ -323,35 +774,45 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Detalle_Convenio');
-    XLSX.writeFile(wb, `Detalle_Licencias_Convenio_${mesNom}_${anio}.xlsx`);
+    XLSX.writeFile(wb, `Detalle_Licencias_Convenio_${mesNom}_${anio}_${filtroEstadoDet}.xlsx`);
   };
 
+  const licenciasNoRechazadasCant = kpiActivo
+    ? Number(kpiActivo.TotalLicencias || 0) - Number(kpiActivo.LicenciasRechazadas || 0)
+    : 0;
+  const pctRecuperoSalud =
+    kpiActivo && Number(kpiActivo.EstimadoNoRechazado || 0) > 0
+      ? Number(((Number(kpiActivo.PagadoNoRechazado || 0) / Number(kpiActivo.EstimadoNoRechazado || 1)) * 100).toFixed(1))
+      : 0;
+
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-6 space-y-6">
-      {/* Encabezado y Controles de Filtro */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-[#f1f5f9] pb-4">
+    <div className="bg-white rounded-2xl shadow-sm border border-[#e2e8f0] p-6 space-y-6">
+      {/* 1. BARRA SUPERIOR: TÍTULO Y FILTROS SIMPLES */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-[#e2e8f0] pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#016098] text-white uppercase tracking-wide">
-              Control Financiero Convenio
+            <span className="px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-[#016098] text-white uppercase">
+              Control Convenio
             </span>
-            <h2 className="text-lg font-bold text-[#016098]">
-              Control Mensual de Licencias con Convenio Tramitadas y Recuperación de Subsidios
+            <h2 className="text-lg font-extrabold text-[#016098]">
+              Resumen de Cobranza a Instituciones de Salud y Licencias Rechazadas
             </h2>
           </div>
-          <p className="text-xs text-[#64748b] mt-1">
-            Seguimiento mensual de licencias con convenio, Pago Estimado Total, Pago Recibido, Saldo por Cobrar, análisis de Rechazadas (Recuperables vs. Incobrables) y exportación a Excel.
+          <p className="text-xs text-[#64748b] mt-0.5">
+            Haga clic en cualquier tarjeta o mes para abrir la nómina detallada en pantalla y exportarla a Excel.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Selector de Año */}
+        <div className="flex flex-wrap items-end gap-2.5">
           <div>
-            <label className="block text-[10px] font-bold text-[#64748b] uppercase mb-0.5">Año</label>
+            <label className="block text-[10px] font-bold text-[#64748b] uppercase mb-1">Año</label>
             <select
               value={anio}
-              onChange={e => setAnio(e.target.value)}
-              className="border border-[#cbd5e1] rounded-lg px-3 py-1.5 text-xs font-bold text-[#016098] bg-[#f8fafc] focus:outline-none focus:ring-2 focus:ring-[#016098]"
+              onChange={e => {
+                setAnio(e.target.value);
+                setRegistrosDetalle([]);
+              }}
+              className="border border-[#cbd5e1] rounded-lg px-3 py-1.5 text-xs font-bold text-[#016098] bg-[#f8fafc]"
             >
               {['2026', '2025', '2024', '2023', '2022', '2021', '2020'].map(y => (
                 <option key={y} value={y}>
@@ -361,19 +822,14 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
             </select>
           </div>
 
-          {/* Selector de Mes */}
           <div>
-            <label className="block text-[10px] font-bold text-[#64748b] uppercase mb-0.5">Mes en Foco (KPIs)</label>
+            <label className="block text-[10px] font-bold text-[#64748b] uppercase mb-1">Período en Tarjetas</label>
             <select
               value={mesSeleccionado}
-              onChange={e => {
-                const m = Number(e.target.value);
-                setMesSeleccionado(m);
-                if (mostrarDetalle) abrirDetalleMes(m);
-              }}
-              className="border border-[#cbd5e1] rounded-lg px-3 py-1.5 text-xs font-semibold text-[#1e293b] bg-[#f8fafc] focus:outline-none focus:ring-2 focus:ring-[#016098]"
+              onChange={e => setMesSeleccionado(Number(e.target.value))}
+              className="border border-[#cbd5e1] rounded-lg px-3 py-1.5 text-xs font-semibold text-[#1e293b] bg-[#f8fafc]"
             >
-              <option value={0}>Todo el Año ({anio})</option>
+              <option value={0}>Año Completo ({anio})</option>
               {mesesData.map(m => (
                 <option key={m.Mes} value={m.Mes}>
                   {m.MesNombre} ({m.TotalLicencias} lic.)
@@ -382,930 +838,883 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
             </select>
           </div>
 
-          {/* Selector de Criterio de Fecha */}
           <div>
-            <label className="block text-[10px] font-bold text-[#64748b] uppercase mb-0.5">Criterio Mes</label>
+            <label className="block text-[10px] font-bold text-[#64748b] uppercase mb-1">Criterio Fecha</label>
             <select
               value={criterio}
-              onChange={e => setCriterio(e.target.value as 'recepcion' | 'desde')}
-              className="border border-[#cbd5e1] rounded-lg px-3 py-1.5 text-xs font-semibold text-[#1e293b] bg-[#f8fafc] focus:outline-none focus:ring-2 focus:ring-[#016098]"
+              onChange={e => {
+                setCriterio(e.target.value as 'recepcion' | 'desde');
+                setRegistrosDetalle([]);
+              }}
+              className="border border-[#cbd5e1] rounded-lg px-3 py-1.5 text-xs font-semibold text-[#1e293b] bg-[#f8fafc]"
             >
-              <option value="desde">Por Fecha Inicio Reposo (Desde)</option>
-              <option value="recepcion">Por Fecha Recepción (Tramitadas)</option>
+              <option value="desde">Fecha Inicio Reposo (Desde)</option>
+              <option value="recepcion">Fecha Recepción (Tramitadas)</option>
             </select>
           </div>
 
-          {/* Selector de Sector */}
           <div>
-            <label className="block text-[10px] font-bold text-[#64748b] uppercase mb-0.5">Sector</label>
+            <label className="block text-[10px] font-bold text-[#64748b] uppercase mb-1">Sector CMDS</label>
             <select
               value={sector}
-              onChange={e => setSector(e.target.value)}
-              className="border border-[#cbd5e1] rounded-lg px-3 py-1.5 text-xs font-semibold text-[#1e293b] bg-[#f8fafc] focus:outline-none focus:ring-2 focus:ring-[#016098]"
+              onChange={e => {
+                setSector(e.target.value);
+                setRegistrosDetalle([]);
+              }}
+              className="border border-[#cbd5e1] rounded-lg px-3 py-1.5 text-xs font-semibold text-[#1e293b] bg-[#f8fafc]"
             >
-              <option value="">Todos (Educación + Salud)</option>
-              <option value="educacion">Solo Educación</option>
-              <option value="salud">Solo Salud</option>
+              <option value="">Todos (Educación + Salud APS)</option>
+              <option value="educacion">Sector Educación</option>
+              <option value="salud">Sector Salud (APS)</option>
             </select>
           </div>
 
-          <div className="pt-3.5 flex gap-2">
-            <button
-              onClick={() => setMostrarModalCobro(true)}
-              className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
-            >
-              Análisis Por Cobrar / Rechazadas
-            </button>
-            <button
-              onClick={() => abrirDetalleMes(mesSeleccionado)}
-              className="px-3.5 py-1.5 bg-[#016098] hover:bg-[#014b78] text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
-            >
-              Ver Detalle ({tituloPeriodoActivo})
-            </button>
-            <button
-              onClick={exportarResumenExcel}
-              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
-            >
-              Exportar Resumen Excel
-            </button>
-          </div>
+          <button
+            onClick={exportarResumenExcel}
+            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors shadow-xs"
+          >
+            Descargar Resumen Anual Excel
+          </button>
         </div>
       </div>
 
-      {/* Tarjetas KPI del Período en Foco */}
       {kpiActivo && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#475569]">
-              Indicadores del Período Seleccionado:{' '}
-              <span className="text-[#016098] underline">{tituloPeriodoActivo}</span>{' '}
-              <span className="text-[#64748b] font-normal">
-                ({criterio === 'desde' ? 'Criterio: Fecha Inicio Reposo' : 'Criterio: Fecha Recepción'})
+        <>
+          {/* 2. NIVEL 1: 4 TARJETAS PRINCIPALES GRANDES Y CLARAS */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase tracking-wide text-[#334155]">
+                1. Resumen General de Licencias Convenio —{' '}
+                <span className="text-[#016098]">{tituloPeriodoActivo}</span>
               </span>
-            </span>
-            {mesSeleccionado > 0 && (
-              <button
-                onClick={() => setMesSeleccionado(0)}
-                className="text-xs font-semibold text-[#016098] hover:underline"
+              {mesSeleccionado > 0 && (
+                <button
+                  onClick={() => setMesSeleccionado(0)}
+                  className="text-xs font-bold text-[#016098] hover:underline"
+                >
+                  ← Volver a ver Año Completo {anio}
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Tarjeta 1: Total Licencias Convenio */}
+              <div
+                onClick={() => abrirModalDetalle(mesSeleccionado, 'todas')}
+                className="bg-[#f8fafc] hover:bg-sky-50/70 cursor-pointer transition-all rounded-xl p-4 border border-[#cbd5e1] border-l-4 border-l-[#016098] flex flex-col justify-between"
               >
-                Volver a ver Acumulado Anual {anio}
-              </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3.5">
-            {/* KPI 1: Total Licencias Convenio Tramitadas */}
-            <div className="bg-[#f8fafc] rounded-xl p-4 border border-[#e2e8f0] border-l-4 border-l-[#016098]">
-              <p className="text-[11px] font-bold text-[#64748b] uppercase">Lic. Convenio Tramitadas</p>
-              <p className="text-2xl font-extrabold text-[#016098] mt-1">
-                {Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')}
-              </p>
-              <p className="text-[11px] text-[#475569] mt-1">
-                <span className="font-semibold">{Number(kpiActivo.TotalDias || 0).toLocaleString('es-CL')}</span> días otorg. ·{' '}
-                <span className="font-semibold">{Number(kpiActivo.TotalDiasAut || 0).toLocaleString('es-CL')}</span> aut.
-              </p>
-            </div>
-
-            {/* KPI 2: Pago Estimado Total */}
-            <div className="bg-[#f8fafc] rounded-xl p-4 border border-[#e2e8f0] border-l-4 border-l-[#39BABD]">
-              <p className="text-[11px] font-bold text-[#64748b] uppercase">Pago Estimado Total</p>
-              <p className="text-xl font-extrabold text-[#1e293b] mt-1">{formatCLP(kpiActivo.TotalEstimado)}</p>
-              <p className="text-[11px] text-[#64748b] mt-1">
-                Subsidio estimado a recuperar
-              </p>
-            </div>
-
-            {/* KPI 3: Pago Recibido */}
-            <div className="bg-emerald-50/50 rounded-xl p-4 border border-emerald-200 border-l-4 border-l-emerald-600">
-              <p className="text-[11px] font-bold text-emerald-800 uppercase">Pago Recibido (Real)</p>
-              <p className="text-xl font-extrabold text-emerald-700 mt-1">{formatCLP(kpiActivo.TotalPagado)}</p>
-              <p className="text-[10px] text-emerald-900 mt-1">
-                Sub: <span className="font-bold">{formatCLP(kpiActivo.PagadoSubsidio)}</span> · Apo:{' '}
-                <span className="font-bold">{formatCLP(kpiActivo.PagadoAporte)}</span>
-              </p>
-            </div>
-
-            {/* KPI 4: Falta por Cobrar (Interactivo -> abre Modal de Desglose) */}
-            <div
-              onClick={() => setMostrarModalCobro(true)}
-              className="bg-amber-50/60 hover:bg-amber-100/70 cursor-pointer transition-colors rounded-xl p-4 border border-amber-200 border-l-4 border-l-amber-500"
-              title="Haga clic para ver el desglose entre Entidades de Salud y Licencias Rechazadas (Recuperables vs. Incobrables)"
-            >
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-bold text-amber-900 uppercase">Falta por Cobrar (Salud)</p>
-                <span className="text-[10px] font-bold bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">
-                  Ver Desglose 🔍
-                </span>
-              </div>
-              <p className="text-xl font-extrabold text-amber-700 mt-1">{formatCLP(kpiActivo.FaltaPorCobrar)}</p>
-              <p className="text-[11px] text-amber-900 mt-1">
-                <span className="font-bold">{Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')}</span> lic. no rechazadas en $0
-              </p>
-            </div>
-
-            {/* KPI 5: % Pago Financiero */}
-            <div className="bg-sky-50/60 rounded-xl p-4 border border-sky-200 border-l-4 border-l-[#016098]">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-bold text-[#016098] uppercase">% Pago (Monto)</p>
-                <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                  {kpiActivo.PorcentajePago}%
-                </span>
-              </div>
-              <p className="text-2xl font-extrabold text-[#016098] mt-1">{kpiActivo.PorcentajePago}%</p>
-              <div className="w-full bg-slate-200 h-2 rounded-full mt-2 overflow-hidden">
-                <div
-                  className="bg-emerald-500 h-full rounded-full transition-all"
-                  style={{ width: `${Math.min(Number(kpiActivo.PorcentajePago || 0), 100)}%` }}
-                />
-              </div>
-            </div>
-
-            {/* KPI 6: Cobertura y Rechazos (Interactivo -> abre Modal de Desglose) */}
-            <div
-              onClick={() => setMostrarModalCobro(true)}
-              className="bg-[#f8fafc] hover:bg-rose-50/50 cursor-pointer transition-colors rounded-xl p-4 border border-[#e2e8f0] border-l-4 border-l-[#EB567F]"
-              title="Haga clic para ver el desglose de Licencias Rechazadas: Recuperables (Vigentes) vs. Incobrables (No Vigentes)"
-            >
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-bold text-[#64748b] uppercase">Cobertura y Rechazos</p>
-                <span className="text-[10px] font-bold bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded">
-                  Desglose 🔍
-                </span>
-              </div>
-              <div className="mt-1 space-y-1 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-[#475569]">Cobertura Lic. Pagadas:</span>
-                  <span className="font-bold text-emerald-700">{kpiActivo.PorcentajeCobertura}%</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-rose-700 font-semibold">
-                    Rechazadas ({Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')}):
-                  </span>
-                  <span className="font-bold text-rose-700">{formatCLP(kpiActivo.MontoRechazado)}</span>
-                </div>
-                <div className="flex justify-between text-[11px] pt-0.5 border-t border-slate-200">
-                  <span className="text-indigo-700 font-semibold" title="Funcionarios Vigentes (Descuento por Remuneraciones)">
-                    Recup. Vig.: {Number(kpiActivo.RechazadasRecuperablesCant || 0).toLocaleString('es-CL')}
-                  </span>
-                  <span className="text-rose-800 font-semibold" title="Funcionarios No Vigentes (Incobrables)">
-                    Incob.: {Number(kpiActivo.RechazadasIncobrablesCant || 0).toLocaleString('es-CL')}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Tarjetones de Desglose: Relación Falta por Cobrar vs. Licencias Rechazadas (Recuperables e Incobrables) */}
-          <div className="bg-slate-50/90 rounded-xl p-4 border border-slate-200 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div>
-                <h3 className="text-xs font-extrabold text-[#016098] uppercase tracking-wide">
-                  Desglose de Licencias por Cobrar y Escenarios de Licencias Rechazadas ({tituloPeriodoActivo})
-                </h3>
-                <p className="text-[11px] text-[#64748b]">
-                  Separación entre saldos pendientes de pago por instituciones de salud y licencias rechazadas según vigencia del funcionario (recuperables por remuneraciones vs. incobrables).
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setMostrarModalCobro(true)}
-                className="px-3 py-1 bg-white border border-[#016098] text-[#016098] hover:bg-[#016098] hover:text-white text-xs font-bold rounded-lg transition-colors self-start sm:self-auto"
-              >
-                Abrir Resumen Explicativo en Modal
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Tarjeta A: Pendientes de Cobro a Entidad de Salud (No Rechazadas) */}
-              <div className="bg-white rounded-lg p-3.5 border border-amber-200 border-l-4 border-l-amber-500 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-900">
-                      1. Entidades de Salud (No Rech.)
-                    </span>
-                    <span className="text-xs font-bold text-amber-800">
-                      {Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')} en $0
+                    <span className="text-xs font-bold text-[#475569] uppercase">Total Licencias Convenio</span>
+                    <span className="text-[11px] font-bold text-[#016098] bg-sky-100 px-2 py-0.5 rounded">
+                      Ver todas →
                     </span>
                   </div>
-                  <p className="text-lg font-extrabold text-amber-700 mt-2">{formatCLP(kpiActivo.FaltaPorCobrar)}</p>
-                  <p className="text-[11px] text-[#475569] mt-1">
-                    <b>{Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')}</b> licencias sin pago ($0) y{' '}
-                    <b>{Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')}</b> con saldo pendiente de FONASA / ISAPRE.
+                  <p className="text-3xl font-extrabold text-[#016098] mt-1.5">
+                    {Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => abrirDetalleMes(mesSeleccionado, 'por-cobrar')}
-                  className="mt-2.5 w-full py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-md text-[11px] font-bold transition-colors"
-                >
-                  Ver Nómina Por Cobrar Salud →
-                </button>
+                <div className="mt-3 pt-2 border-t border-slate-200 flex justify-between text-xs">
+                  <span className="text-[#334155]">
+                    Válidas/Trámite: <b className="text-emerald-700">{licenciasNoRechazadasCant.toLocaleString('es-CL')}</b>
+                  </span>
+                  <span className="text-[#334155]">
+                    Rechazadas: <b className="text-rose-600">{Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')}</b>
+                  </span>
+                </div>
               </div>
 
-              {/* Tarjeta B: Rechazadas Recuperables (Funcionario Vigente - Descuento Remuneraciones) */}
-              <div className="bg-white rounded-lg p-3.5 border border-indigo-200 border-l-4 border-l-indigo-600 flex flex-col justify-between">
+              {/* Tarjeta 2: Pago Estimado a Recuperar */}
+              <div
+                onClick={() => abrirModalDetalle(mesSeleccionado, 'todas')}
+                className="bg-[#f8fafc] hover:bg-sky-50/70 cursor-pointer transition-all rounded-xl p-4 border border-[#cbd5e1] border-l-4 border-l-[#39BABD] flex flex-col justify-between"
+              >
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-900">
-                      2. Rechazadas Recuperables
+                    <span className="text-xs font-bold text-[#475569] uppercase">Pago Estimado (No Rech.)</span>
+                    <span className="text-[11px] font-semibold text-[#64748b]">Meta Inst. Salud</span>
+                  </div>
+                  <p className="text-2xl font-extrabold text-[#1e293b] mt-1.5">
+                    {formatCLP(kpiActivo.EstimadoNoRechazado)}
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-slate-200 text-xs text-[#475569] flex justify-between">
+                  <span>+ Rechazadas: <b className="text-rose-600">{formatCLP(kpiActivo.MontoRechazado)}</b></span>
+                  <span>Total: <b>{formatCLP(kpiActivo.TotalEstimado)}</b></span>
+                </div>
+              </div>
+
+              {/* Tarjeta 3: Pago Recibido de Instituciones de Salud (Real) */}
+              <div
+                onClick={() => abrirModalDetalle(mesSeleccionado, 'pagadas')}
+                className="bg-emerald-50/60 hover:bg-emerald-100/60 cursor-pointer transition-all rounded-xl p-4 border border-emerald-200 border-l-4 border-l-emerald-600 flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-900 uppercase">Pagado por Inst. de Salud</span>
+                    <span className="text-xs font-extrabold text-emerald-800 bg-emerald-200/80 px-2 py-0.5 rounded-full">
+                      {pctRecuperoSalud}% recup.
                     </span>
-                    <span className="text-xs font-bold text-indigo-800">
+                  </div>
+                  <p className="text-2xl font-extrabold text-emerald-700 mt-1.5">
+                    {formatCLP(kpiActivo.PagadoSaludTotal)}
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-emerald-200 text-xs text-emerald-950 flex justify-between">
+                  <span>Sub: <b>{formatCLP(kpiActivo.PagadoSubsidio)}</b></span>
+                  <span>Apo: <b>{formatCLP(kpiActivo.PagadoAporte)}</b></span>
+                </div>
+              </div>
+
+              {/* Tarjeta 4: Falta por Cobrar a Instituciones de Salud (No Rechazadas) */}
+              <div
+                onClick={() => abrirModalDetalle(mesSeleccionado, 'por-cobrar')}
+                className="bg-amber-50/70 hover:bg-amber-100/70 cursor-pointer transition-all rounded-xl p-4 border border-amber-200 border-l-4 border-l-amber-500 flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-amber-900 uppercase">Falta Cobrar (Inst. de Salud)</span>
+                    <span className="text-[11px] font-bold text-amber-900 bg-amber-200 px-2 py-0.5 rounded">
+                      Ver nómina →
+                    </span>
+                  </div>
+                  <p className="text-2xl font-extrabold text-amber-700 mt-1.5">
+                    {formatCLP(kpiActivo.FaltaPorCobrar)}
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t border-amber-200 text-xs text-amber-950 flex justify-between">
+                  <span>
+                    En $0 sin pago: <b>{Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')} lic.</b>
+                  </span>
+                  <span>
+                    Con saldo: <b>{Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic.</b>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* TARJETÓN RESUMEN EXPLICATIVO ÚNICO: ¿CÓMO SE FORMA Y CUADRA TODO? */}
+          <div className="bg-linear-to-r from-[#f8fafc] to-sky-50/50 rounded-xl p-4 border border-sky-200 shadow-2xs">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-sky-200/80 pb-2.5 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-[#016098] text-white uppercase">
+                  Guía de Cuadratura
+                </span>
+                <h3 className="text-xs font-extrabold text-[#016098] uppercase tracking-wide">
+                  ¿Cómo se forma el total y cómo cuadran las licencias y los montos en {tituloPeriodoActivo}?
+                </h3>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={exportarGuiaCuadraturaPDF}
+                  className="px-3 py-1 bg-[#016098] hover:bg-[#014b78] text-white text-[11px] font-bold rounded-md transition-colors shadow-2xs cursor-pointer"
+                >
+                  📄 Exportar Guía a PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={exportarGuiaCuadraturaExcel}
+                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-md transition-colors shadow-2xs cursor-pointer"
+                >
+                  📊 Exportar Guía a Excel
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+              {/* Columna 1: Cómo se componen las Licencias (Cantidades) */}
+              <div className="bg-white rounded-lg p-3.5 border border-slate-200 space-y-2">
+                <div className="font-extrabold text-[#1e293b] border-b border-slate-100 pb-1.5 flex justify-between items-center">
+                  <span>A. Composición del Universo de Licencias</span>
+                  <span className="text-[#016098]">
+                    Total: {Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')} lic.
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 text-[#334155]">
+                  <div className="flex justify-between items-center bg-emerald-50/70 px-2.5 py-1.5 rounded border border-emerald-100">
+                    <span>
+                      <b>1. Licencias Válidas / En Trámite</b> (Sin marca de rechazo):
+                    </span>
+                    <b className="text-emerald-800">{licenciasNoRechazadasCant.toLocaleString('es-CL')} lic.</b>
+                  </div>
+                  <div className="pl-4 space-y-1 text-[11px] text-[#475569]">
+                    <div className="flex justify-between">
+                      <span>• Con pago recibido de Inst. de Salud (total o parcial):</span>
+                      <b>
+                        {(
+                          licenciasNoRechazadasCant - Number(kpiActivo.LicenciasSinPago || 0)
+                        ).toLocaleString('es-CL')}{' '}
+                        lic.
+                      </b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>• En $0 esperando pago de Inst. de Salud:</span>
+                      <b className="text-amber-700">
+                        {Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')} lic.
+                      </b>
+                    </div>
+                    <div className="flex justify-between text-[#016098]">
+                      <span>
+                        ↳ Total Válidas que aún tienen saldo <b>Falta por Cobrar a Inst. de Salud</b> (en $0 + pago parcial):
+                      </span>
+                      <b>{Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic.</b>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center bg-rose-50/70 px-2.5 py-1.5 rounded border border-rose-100 mt-2">
+                    <span>
+                      <b>2. Licencias Marcadas como Rechazadas</b> (Rechazo = 1):
+                    </span>
+                    <b className="text-rose-700">
+                      {Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} lic.
+                    </b>
+                  </div>
+                  <div className="pl-4 space-y-1 text-[11px] text-[#475569]">
+                    <div className="flex justify-between">
+                      <span>• Con saldo por descontar a Funcionario Vigente (Recuperables):</span>
+                      <b className="text-indigo-700">
+                        {Number(kpiActivo.RechazadasRecuperablesCant || 0).toLocaleString('es-CL')} lic.
+                      </b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>• Con saldo de Ex-Funcionario No Vigente (Incobrables):</span>
+                      <b className="text-rose-700">
+                        {Number(kpiActivo.RechazadasIncobrablesCant || 0).toLocaleString('es-CL')} lic.
+                      </b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>• Con Descuento/Devolución aplicado ({Number(kpiActivo.RechazadasRecuperadasDescCant || 0)} lic.) o Falso Rechazo pagado por Inst. de Salud ({Number(kpiActivo.FalsosRechazosPagadosCant || 0)} lic.):</span>
+                      <b className="text-teal-700">
+                        {(
+                          Number(kpiActivo.LicenciasRechazadas || 0) -
+                          Number(kpiActivo.RechazadasRecuperablesCant || 0) -
+                          Number(kpiActivo.RechazadasIncobrablesCant || 0)
+                        ).toLocaleString('es-CL')}{' '}
+                        lic. saldadas
+                      </b>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Columna 2: Cómo cuadran los Montos Financieros ($) */}
+              <div className="bg-white rounded-lg p-3.5 border border-slate-200 space-y-2">
+                <div className="font-extrabold text-[#1e293b] border-b border-slate-100 pb-1.5 flex justify-between items-center">
+                  <span>B. Cuadratura Financiera de Montos ($)</span>
+                  <span className="text-emerald-700">Fórmula de Conciliación</span>
+                </div>
+
+                <div className="space-y-1.5 text-[#334155]">
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span>Pago Estimado Total ({Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')} lic.):</span>
+                    <b>{formatCLP(kpiActivo.TotalEstimado)}</b>
+                  </div>
+                  <div className="flex justify-between items-center text-[11px] text-rose-700">
+                    <span>(-) Menos Estimado de Licencias Rechazadas ({Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} lic.):</span>
+                    <b>- {formatCLP(kpiActivo.MontoRechazado)}</b>
+                  </div>
+                  <div className="flex justify-between items-center bg-sky-50 px-2.5 py-1.5 rounded border border-sky-200 font-bold text-[#016098]">
+                    <span>(=) Meta Estimada a Cobrar a Inst. de Salud (No Rechazadas):</span>
+                    <span>{formatCLP(kpiActivo.EstimadoNoRechazado)}</span>
+                  </div>
+
+                  <div className="pl-3 space-y-1 text-[11px] border-l-2 border-emerald-400 my-1">
+                    <div className="flex justify-between">
+                      <span>• Pagado por Inst. de Salud en licencias No Rechazadas:</span>
+                      <b className="text-emerald-700">{formatCLP(kpiActivo.PagadoNoRechazado)}</b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>• (+) Pagado por Inst. de Salud en Falsos Rechazos ({Number(kpiActivo.FalsosRechazosPagadosCant || 0)} lic.):</span>
+                      <b className="text-emerald-700">+ {formatCLP(kpiActivo.MontoFalsoRechazoSalud)}</b>
+                    </div>
+                    <div className="flex justify-between font-bold text-emerald-900 bg-emerald-50/70 px-2 py-0.5 rounded">
+                      <span>(=) Total Pagado por Inst. de Salud (BCI = Subsidio + Aporte):</span>
+                      <span>{formatCLP(kpiActivo.PagadoSaludTotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-amber-800 pt-0.5">
+                      <span>• Falta por Cobrar a Inst. de Salud (Saldo de las {Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic. válidas):</span>
+                      <b>{formatCLP(kpiActivo.FaltaPorCobrar)}</b>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center bg-teal-50/80 px-2.5 py-1.5 rounded border border-teal-200 text-[11px] text-teal-950">
+                    <span>
+                      <b>Aparte — Recuperado por Descuento / Devolución a Funcionarios</b> (No se suma a Inst. de Salud):
+                    </span>
+                    <b className="text-teal-800">{formatCLP(kpiActivo.PagadoDescuentoFunc)}</b>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. NIVEL 2: SEMÁFORO CLARO DE LICENCIAS RECHAZADAS (4 CAJAS DE 1 CLIC) */}
+          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-600"></span>
+                <h3 className="text-xs font-extrabold text-[#1e293b] uppercase tracking-wide">
+                  2. Desglose de las {Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} Licencias Marcadas como Rechazadas ({formatCLP(kpiActivo.MontoRechazado)})
+                </h3>
+              </div>
+              <span className="text-[11px] text-[#64748b]">
+                Presione cualquier recuadro para abrir la ventana con el listado de funcionarios y exportar a Excel
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {/* Caja A: Recuperables por Remuneraciones (Vigentes) */}
+              <div
+                onClick={() => abrirModalDetalle(mesSeleccionado, 'rech-recuperables')}
+                className="bg-white hover:bg-indigo-50/40 cursor-pointer transition-all rounded-xl p-4 border border-indigo-200 shadow-2xs flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-indigo-100 text-indigo-900">
+                      A. Recuperables (Vigentes)
+                    </span>
+                    <span className="text-xs font-extrabold text-indigo-700">
                       {Number(kpiActivo.RechazadasRecuperablesCant || 0).toLocaleString('es-CL')} lic.
                     </span>
                   </div>
-                  <p className="text-lg font-extrabold text-indigo-700 mt-2">
+                  <p className="text-xl font-extrabold text-indigo-700 mt-2">
                     {formatCLP(kpiActivo.MontoRechazadoRecuperable)}
                   </p>
-                  <p className="text-[11px] text-[#475569] mt-1">
-                    <b>Funcionario Vigente:</b> Susceptible de recuperar mediante descuento por remuneraciones al trabajador activo.
+                  <p className="text-xs text-[#475569] mt-1">
+                    Funcionarios <b>activos en la Corporación</b>: se puede descontar de sus remuneraciones.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => abrirDetalleMes(mesSeleccionado, 'rech-recuperables')}
-                  className="mt-2.5 w-full py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-300 rounded-md text-[11px] font-bold transition-colors"
-                >
-                  Ver Rechazadas Recuperables ({Number(kpiActivo.RechazadasRecuperablesCant || 0).toLocaleString('es-CL')}) →
-                </button>
+                <div className="mt-3 text-xs font-bold text-indigo-700 flex items-center justify-between pt-2 border-t border-slate-100">
+                  <span>Abrir listado de vigentes</span>
+                  <span>→</span>
+                </div>
               </div>
 
-              {/* Tarjeta C: Rechazadas Incobrables (Funcionario No Vigente / Finiquitado) */}
-              <div className="bg-white rounded-lg p-3.5 border border-rose-200 border-l-4 border-l-rose-600 flex flex-col justify-between">
+              {/* Caja B: Incobrables (No Vigentes / Finiquitados) */}
+              <div
+                onClick={() => abrirModalDetalle(mesSeleccionado, 'rech-incobrables')}
+                className="bg-white hover:bg-rose-50/40 cursor-pointer transition-all rounded-xl p-4 border border-rose-200 shadow-2xs flex flex-col justify-between"
+              >
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-rose-100 text-rose-900">
-                      3. Rechazadas Incobrables
+                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-rose-100 text-rose-900">
+                      B. Incobrables (No Vigentes)
                     </span>
-                    <span className="text-xs font-bold text-rose-800">
+                    <span className="text-xs font-extrabold text-rose-700">
                       {Number(kpiActivo.RechazadasIncobrablesCant || 0).toLocaleString('es-CL')} lic.
                     </span>
                   </div>
-                  <p className="text-lg font-extrabold text-rose-700 mt-2">
+                  <p className="text-xl font-extrabold text-rose-700 mt-2">
                     {formatCLP(kpiActivo.MontoRechazadoIncobrable)}
                   </p>
-                  <p className="text-[11px] text-[#475569] mt-1">
-                    <b>Funcionario No Vigente:</b> Ex-funcionarios desvinculados de la Corporación (no se puede descontar por planilla).
+                  <p className="text-xs text-[#475569] mt-1">
+                    Ex-funcionarios <b>finiquitados / no vigentes</b>: ya no es posible descontar por planilla.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => abrirDetalleMes(mesSeleccionado, 'rech-incobrables')}
-                  className="mt-2.5 w-full py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-900 border border-rose-300 rounded-md text-[11px] font-bold transition-colors"
-                >
-                  Ver Rechazadas Incobrables ({Number(kpiActivo.RechazadasIncobrablesCant || 0).toLocaleString('es-CL')}) →
-                </button>
+                <div className="mt-3 text-xs font-bold text-rose-700 flex items-center justify-between pt-2 border-t border-slate-100">
+                  <span>Abrir listado incobrables</span>
+                  <span>→</span>
+                </div>
               </div>
 
-              {/* Tarjeta D: Rechazadas Ya Recuperadas / Pagadas */}
-              <div className="bg-white rounded-lg p-3.5 border border-emerald-200 border-l-4 border-l-emerald-600 flex flex-col justify-between">
+              {/* Caja C: Ya Recuperadas por Descuento / Devolución */}
+              <div
+                onClick={() => abrirModalDetalle(mesSeleccionado, 'rech-recuperadas')}
+                className="bg-white hover:bg-emerald-50/40 cursor-pointer transition-all rounded-xl p-4 border border-emerald-200 shadow-2xs flex flex-col justify-between"
+              >
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-900">
-                      4. Rechazadas Recuperadas
+                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-emerald-100 text-emerald-900">
+                      C. Recuperadas (Descuento)
                     </span>
-                    <span className="text-xs font-bold text-emerald-800">
-                      {Number(kpiActivo.RechazadasRecuperadasCant || 0).toLocaleString('es-CL')} lic.
+                    <span className="text-xs font-extrabold text-emerald-700">
+                      {Number(kpiActivo.RechazadasRecuperadasDescCant || 0).toLocaleString('es-CL')} lic.
                     </span>
                   </div>
-                  <p className="text-lg font-extrabold text-emerald-700 mt-2">
-                    {formatCLP(kpiActivo.MontoRechazadoRecuperado)}
+                  <p className="text-xl font-extrabold text-emerald-700 mt-2">
+                    {formatCLP(kpiActivo.MontoRechazadoDescuentoFunc)}
                   </p>
-                  <p className="text-[11px] text-[#475569] mt-1">
-                    Licencias marcadas con rechazo que ya registran pago/reintegro en el sistema (de un total de{' '}
-                    <b>{Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')}</b> rechazadas).
+                  <p className="text-xs text-[#475569] mt-1">
+                    Monto ya recuperado del funcionario mediante <b>Descuento por Remuneraciones</b> o Devolución.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => abrirDetalleMes(mesSeleccionado, 'rech-recuperadas')}
-                  className="mt-2.5 w-full py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-md text-[11px] font-bold transition-colors"
-                >
-                  Ver Rechazadas Recuperadas ({Number(kpiActivo.RechazadasRecuperadasCant || 0).toLocaleString('es-CL')}) →
-                </button>
+                <div className="mt-3 text-xs font-bold text-emerald-700 flex items-center justify-between pt-2 border-t border-slate-100">
+                  <span>Abrir listado recuperadas</span>
+                  <span>→</span>
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Modal Explicativo e Interactivo de Saldos por Cobrar y Licencias Rechazadas */}
-      {mostrarModalCobro && kpiActivo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-5">
-            <div className="flex items-start justify-between border-b border-slate-200 pb-3">
-              <div>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#016098] text-white uppercase">
-                  Radiografía de Cobranza y Rechazos
-                </span>
-                <h3 className="text-lg font-extrabold text-[#1e293b] mt-1">
-                  Desglose de Licencias por Cobrar y Escenarios de Rechazo — {tituloPeriodoActivo}
-                </h3>
-                <p className="text-xs text-[#64748b]">
-                  Cuadratura completa de licencias pendientes de pago y clasificación de licencias rechazadas según vigencia del funcionario en la Corporación.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setMostrarModalCobro(false)}
-                className="px-3 py-1 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 text-xs font-bold"
+              {/* Caja D: Falsos Rechazos (Pagadas por Inst. de Salud o Autorizadas COMPIN) */}
+              <div
+                onClick={() => abrirModalDetalle(mesSeleccionado, 'falso-rechazo-salud')}
+                className="bg-white hover:bg-orange-50/50 cursor-pointer transition-all rounded-xl p-4 border-2 border-orange-300 shadow-2xs flex flex-col justify-between"
               >
-                Cerrar ✕
-              </button>
-            </div>
-
-            {/* Resumen Cuadratura de Rechazadas */}
-            <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-bold text-[#1e293b] uppercase">
-                  Cuadratura Total Licencias Rechazadas del Período:{' '}
-                  <span className="text-rose-700 text-sm font-extrabold">
-                    {Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} licencias
-                  </span>{' '}
-                  ({formatCLP(kpiActivo.MontoRechazado)} estimado)
-                </span>
-                <span className="text-xs font-semibold text-[#475569]">
-                  = {Number(kpiActivo.RechazadasRecuperablesCant || 0).toLocaleString('es-CL')} Recuperables (Vigentes) +{' '}
-                  {Number(kpiActivo.RechazadasIncobrablesCant || 0).toLocaleString('es-CL')} Incobrables (No Vigentes) +{' '}
-                  {Number(kpiActivo.RechazadasRecuperadasCant || 0).toLocaleString('es-CL')} Ya Recuperadas
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                <div className="bg-white p-3 rounded-lg border border-slate-200">
-                  <p className="text-[11px] font-bold text-[#64748b] uppercase">
-                    Saldo Pendiente Entidades Salud (No Rechazadas)
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-orange-100 text-orange-900">
+                      D. ⚠️ Falsos Rechazos
+                    </span>
+                    <span className="text-xs font-extrabold text-orange-800">
+                      {Number(kpiActivo.FalsosRechazosPagadosCant || 0).toLocaleString('es-CL')} pag. Inst. Salud
+                    </span>
+                  </div>
+                  <p className="text-xl font-extrabold text-orange-700 mt-2">
+                    {formatCLP(kpiActivo.MontoFalsoRechazoSalud)}
                   </p>
-                  <p className="text-xl font-extrabold text-amber-700 mt-0.5">{formatCLP(kpiActivo.FaltaPorCobrar)}</p>
-                  <p className="text-[11px] text-[#475569]">
-                    {Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')} licencias en $0 ·{' '}
-                    {Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} con saldo por cobrar a FONASA/ISAPRE
+                  <p className="text-xs text-[#475569] mt-1">
+                    Figuran con check Rechazo, pero <b>la Inst. de Salud las pagó en BCI</b> ({kpiActivo.FalsosRechazosDobleCobroCant} con
+                    doble cobro y {kpiActivo.FalsosRechazosCompinCant} autorizadas COMPIN).
                   </p>
                 </div>
-                <div className="bg-white p-3 rounded-lg border border-slate-200">
-                  <p className="text-[11px] font-bold text-[#64748b] uppercase">
-                    Saldo Total General sin Recuperar (Salud + Rechazadas Pend.)
-                  </p>
-                  <p className="text-xl font-extrabold text-[#016098] mt-0.5">
-                    {formatCLP(kpiActivo.FaltaPorCobrarTotal)}
-                  </p>
-                  <p className="text-[11px] text-[#475569]">
-                    Incluye {formatCLP(kpiActivo.MontoRechazadoRecuperable)} recuperable por planilla y{' '}
-                    {formatCLP(kpiActivo.MontoRechazadoIncobrable)} incobrable
-                  </p>
+                <div className="mt-3 text-xs font-bold text-orange-800 flex items-center justify-between pt-2 border-t border-orange-100">
+                  <span>Revisar falsos rechazos</span>
+                  <span>→</span>
                 </div>
-              </div>
-            </div>
-
-            {/* Tarjetas de Acción Rápida del Modal */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Escenario 1: Rechazadas Recuperables */}
-              <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/40 p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-600 text-white">
-                    Escenario A · Recuperables (Funcionario Vigente)
-                  </span>
-                  <span className="text-sm font-extrabold text-indigo-900">
-                    {Number(kpiActivo.RechazadasRecuperablesCant || 0).toLocaleString('es-CL')} licencias
-                  </span>
-                </div>
-                <p className="text-2xl font-extrabold text-indigo-700">
-                  {formatCLP(kpiActivo.MontoRechazadoRecuperable)}
-                </p>
-                <p className="text-xs text-[#334155]">
-                  Corresponde a licencias rechazadas con saldo pendiente cuyos funcionarios se encuentran{' '}
-                  <b>Vigentes (&apos;S&apos;)</b> en la Corporación. Este monto <b>se puede recuperar</b> mediante descuento en sus remuneraciones.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMostrarModalCobro(false);
-                    abrirDetalleMes(mesSeleccionado, 'rech-recuperables');
-                  }}
-                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs transition-colors"
-                >
-                  Ver Detalle y Exportar a Excel ({Number(kpiActivo.RechazadasRecuperablesCant || 0).toLocaleString('es-CL')} lic.)
-                </button>
-              </div>
-
-              {/* Escenario 2: Rechazadas Incobrables */}
-              <div className="rounded-xl border-2 border-rose-200 bg-rose-50/40 p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-600 text-white">
-                    Escenario B · Incobrables (Funcionario No Vigente)
-                  </span>
-                  <span className="text-sm font-extrabold text-rose-900">
-                    {Number(kpiActivo.RechazadasIncobrablesCant || 0).toLocaleString('es-CL')} licencias
-                  </span>
-                </div>
-                <p className="text-2xl font-extrabold text-rose-700">
-                  {formatCLP(kpiActivo.MontoRechazadoIncobrable)}
-                </p>
-                <p className="text-xs text-[#334155]">
-                  Corresponde a licencias rechazadas con saldo pendiente de ex-funcionarios que{' '}
-                  <b>Ya No Pertenecen a la Corporación (No Vigentes)</b>. No es posible descontar por remuneraciones (riesgo de incobrabilidad).
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMostrarModalCobro(false);
-                    abrirDetalleMes(mesSeleccionado, 'rech-incobrables');
-                  }}
-                  className="w-full py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg shadow-xs transition-colors"
-                >
-                  Ver Detalle y Exportar a Excel ({Number(kpiActivo.RechazadasIncobrablesCant || 0).toLocaleString('es-CL')} lic.)
-                </button>
-              </div>
-
-              {/* Escenario 3: Por Cobrar a Entidad de Salud (No Rechazadas) */}
-              <div className="rounded-xl border border-amber-300 bg-amber-50/40 p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-600 text-white">
-                    Por Cobrar a Entidad de Salud (No Rechazadas)
-                  </span>
-                  <span className="text-sm font-extrabold text-amber-900">
-                    {Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')} lic. en $0
-                  </span>
-                </div>
-                <p className="text-xl font-extrabold text-amber-700">{formatCLP(kpiActivo.FaltaPorCobrar)}</p>
-                <p className="text-xs text-[#334155]">
-                  Licencias tramitadas sin rechazo pendientes de pago o reembolso por parte de FONASA, ISAPRE o CCAF.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMostrarModalCobro(false);
-                    abrirDetalleMes(mesSeleccionado, 'por-cobrar');
-                  }}
-                  className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shadow-xs transition-colors"
-                >
-                  Ver Nómina Por Cobrar Salud
-                </button>
-              </div>
-
-              {/* Escenario 4: Rechazadas Ya Recuperadas */}
-              <div className="rounded-xl border border-emerald-300 bg-emerald-50/40 p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-600 text-white">
-                    Rechazadas Ya Recuperadas / Regularizadas
-                  </span>
-                  <span className="text-sm font-extrabold text-emerald-900">
-                    {Number(kpiActivo.RechazadasRecuperadasCant || 0).toLocaleString('es-CL')} licencias
-                  </span>
-                </div>
-                <p className="text-xl font-extrabold text-emerald-700">
-                  {formatCLP(kpiActivo.MontoRechazadoRecuperado)}
-                </p>
-                <p className="text-xs text-[#334155]">
-                  Licencias que tuvieron rechazo pero ya cuentan con pago o reintegro registrado por apelación o descuento.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMostrarModalCobro(false);
-                    abrirDetalleMes(mesSeleccionado, 'rech-recuperadas');
-                  }}
-                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs transition-colors"
-                >
-                  Ver Rechazadas Ya Recuperadas
-                </button>
               </div>
             </div>
           </div>
-        </div>
+        </>
       )}
 
-      {/* Gráfico Mensual: Pago Estimado vs Pago Recibido vs Falta por Cobrar */}
-      {mesesData.length > 0 && (
-        <div className="bg-[#f8fafc] rounded-xl p-4 border border-[#e2e8f0]">
-          <h3 className="text-xs font-bold text-[#016098] uppercase tracking-wider mb-3">
-            Comparativa Mensual {anio}: Pago Estimado vs Pago Recibido vs Falta por Cobrar ($)
+      {/* 4. DESGLOSE MENSUAL CON PESTAÑAS (TABLA MENSUAL O GRÁFICO) */}
+      <div className="space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <h3 className="text-xs font-extrabold text-[#334155] uppercase tracking-wide">
+            3. Detalle Mes a Mes ({anio}) — Haga clic en &quot;Abrir Detalle&quot; en cualquier mes
           </h3>
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={mesesData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="MesCorto" tick={{ fontSize: 11, fill: '#475569' }} />
-                <YAxis
-                  tick={{ fontSize: 11, fill: '#475569' }}
-                  tickFormatter={val => `$${Math.round(val / 1000000)}M`}
-                />
-                <RechartsTooltip
-                  formatter={(value: any) => formatCLP(Number(value))}
-                  contentStyle={{ borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '12px' }}
-                />
-                <Legend wrapperStyle={{ fontSize: '12px' }} />
-                <Bar dataKey="TotalEstimado" name="Pago Estimado ($)" fill="#016098" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="TotalPagado" name="Pago Recibido ($)" fill="#10b981" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="FaltaPorCobrar" name="Falta por Cobrar Salud ($)" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="inline-flex rounded-lg border border-[#cbd5e1] bg-[#f8fafc] p-0.5 self-start">
+            <button
+              type="button"
+              onClick={() => setVistaInferior('tabla')}
+              className={`px-3 py-1 rounded-md text-xs font-bold transition-colors ${
+                vistaInferior === 'tabla' ? 'bg-[#016098] text-white shadow-2xs' : 'text-[#475569] hover:text-[#016098]'
+              }`}
+            >
+              📅 Ver Tabla Mensual
+            </button>
+            <button
+              type="button"
+              onClick={() => setVistaInferior('grafico')}
+              className={`px-3 py-1 rounded-md text-xs font-bold transition-colors ${
+                vistaInferior === 'grafico' ? 'bg-[#016098] text-white shadow-2xs' : 'text-[#475569] hover:text-[#016098]'
+              }`}
+            >
+              📊 Ver Gráfico Comparativo
+            </button>
           </div>
         </div>
-      )}
 
-      {/* Tabla Resumen Mensual (Enero a Diciembre) */}
-      <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl">
-        <table className="w-full text-left text-xs">
-          <thead className="bg-[#f1f5f9] text-[#475569] font-bold">
-            <tr>
-              <th className="p-2.5">Mes</th>
-              <th className="p-2.5 text-center">Lic. Tramitadas</th>
-              <th className="p-2.5 text-center">Con Pago / $0 / Rech.</th>
-              <th className="p-2.5 text-center" title="Rechazadas Recuperables (Vigentes) vs Incobrables (No Vigentes)">
-                Rech: Recup. / Incob.
-              </th>
-              <th className="p-2.5 text-right">Pago Estimado ($)</th>
-              <th className="p-2.5 text-right">Pago Recibido ($)</th>
-              <th className="p-2.5 text-right">Falta Cobrar Salud ($)</th>
-              <th className="p-2.5 text-right">Rech. Recuperable ($)</th>
-              <th className="p-2.5 text-right">Rech. Incobrable ($)</th>
-              <th className="p-2.5 text-center">% Pago ($)</th>
-              <th className="p-2.5 text-center">Detalle</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#e2e8f0]">
-            {cargando ? (
-              <tr>
-                <td colSpan={11} className="p-6 text-center text-[#64748b]">
-                  Calculando indicadores mensuales de licencias con convenio...
-                </td>
-              </tr>
-            ) : (
-              mesesData.map(m => {
-                const activo = mesSeleccionado === m.Mes;
-                return (
-                  <tr
-                    key={m.Mes}
-                    onClick={() => setMesSeleccionado(m.Mes)}
-                    className={`cursor-pointer transition-colors ${
-                      activo ? 'bg-sky-50 font-semibold' : 'hover:bg-[#f8fafc]'
-                    }`}
-                  >
-                    <td className="p-2.5 font-bold text-[#016098]">{m.MesNombre}</td>
-                    <td className="p-2.5 text-center font-bold">{m.TotalLicencias.toLocaleString('es-CL')}</td>
-                    <td className="p-2.5 text-center">
-                      <span className="text-emerald-700 font-semibold">{m.LicenciasPagadas}</span> /{' '}
-                      <span className="text-amber-700 font-semibold">{m.LicenciasSinPago}</span> /{' '}
-                      <span className="text-rose-700 font-semibold">{m.LicenciasRechazadas}</span>
-                    </td>
-                    <td className="p-2.5 text-center">
-                      <span className="text-indigo-700 font-bold" title="Funcionarios Vigentes (Descuento Remuneraciones)">
-                        {m.RechazadasRecuperablesCant}
-                      </span>{' '}
-                      /{' '}
-                      <span className="text-rose-700 font-bold" title="Funcionarios No Vigentes (Incobrables)">
-                        {m.RechazadasIncobrablesCant}
-                      </span>
-                    </td>
-                    <td className="p-2.5 text-right font-semibold">{formatCLP(m.TotalEstimado)}</td>
-                    <td className="p-2.5 text-right font-bold text-emerald-700">{formatCLP(m.TotalPagado)}</td>
-                    <td className="p-2.5 text-right font-bold text-amber-700">{formatCLP(m.FaltaPorCobrar)}</td>
-                    <td className="p-2.5 text-right font-semibold text-indigo-700">
-                      {formatCLP(m.MontoRechazadoRecuperable)}
-                    </td>
-                    <td className="p-2.5 text-right font-semibold text-rose-700">
-                      {formatCLP(m.MontoRechazadoIncobrable)}
-                    </td>
-                    <td className="p-2.5 text-center">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                          m.PorcentajePago >= 85
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : m.PorcentajePago >= 50
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-rose-100 text-rose-800'
-                        }`}
-                      >
-                        {m.PorcentajePago}%
-                      </span>
-                    </td>
-                    <td className="p-2.5 text-center">
-                      <button
-                        type="button"
-                        onClick={e => {
-                          e.stopPropagation();
-                          abrirDetalleMes(m.Mes);
-                        }}
-                        className="px-2.5 py-1 bg-[#016098] hover:bg-[#014b78] text-white text-[11px] font-bold rounded-md transition-colors"
-                      >
-                        Ver Detalle
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-
-            {/* Fila TOTAL ANUAL */}
-            {totalesAnuales && !cargando && (
-              <tr className="bg-[#f1f5f9] font-extrabold text-[#1e293b] border-t-2 border-[#cbd5e1]">
-                <td className="p-2.5 text-[#016098]">TOTAL ANUAL {anio}</td>
-                <td className="p-2.5 text-center">{totalesAnuales.TotalLicencias.toLocaleString('es-CL')}</td>
-                <td className="p-2.5 text-center">
-                  <span className="text-emerald-700">{totalesAnuales.LicenciasPagadas}</span> /{' '}
-                  <span className="text-amber-700">{totalesAnuales.LicenciasSinPago}</span> /{' '}
-                  <span className="text-rose-700">{totalesAnuales.LicenciasRechazadas}</span>
-                </td>
-                <td className="p-2.5 text-center">
-                  <span className="text-indigo-700">{totalesAnuales.RechazadasRecuperablesCant}</span> /{' '}
-                  <span className="text-rose-700">{totalesAnuales.RechazadasIncobrablesCant}</span>
-                </td>
-                <td className="p-2.5 text-right">{formatCLP(totalesAnuales.TotalEstimado)}</td>
-                <td className="p-2.5 text-right text-emerald-700">{formatCLP(totalesAnuales.TotalPagado)}</td>
-                <td className="p-2.5 text-right text-amber-700">{formatCLP(totalesAnuales.FaltaPorCobrar)}</td>
-                <td className="p-2.5 text-right text-indigo-700">
-                  {formatCLP(totalesAnuales.MontoRechazadoRecuperable)}
-                </td>
-                <td className="p-2.5 text-right text-rose-700">
-                  {formatCLP(totalesAnuales.MontoRechazadoIncobrable)}
-                </td>
-                <td className="p-2.5 text-center text-[#016098]">{totalesAnuales.PorcentajePago}%</td>
-                <td className="p-2.5 text-center">
-                  <button
-                    type="button"
-                    onClick={() => abrirDetalleMes(0)}
-                    className="px-2.5 py-1 bg-slate-700 hover:bg-slate-800 text-white text-[11px] font-bold rounded-md"
-                  >
-                    Ver Todo {anio}
-                  </button>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Panel Desplegable de Detalle de Licencias del Mes / Año */}
-      {mostrarDetalle && (
-        <div className="bg-[#f8fafc] rounded-xl border-2 border-[#016098]/30 p-5 space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b border-[#e2e8f0] pb-3">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-bold text-[#016098] uppercase">
-                  Detalle de Licencias con Convenio —{' '}
-                  {mesDetalle > 0
-                    ? `${mesesData.find(m => m.Mes === mesDetalle)?.MesNombre || ''} ${anio}`
-                    : `Año Completo ${anio}`}{' '}
-                  ({registrosDetalleFiltrados.length} registros)
-                </h3>
-                {promedioDiasDemora !== null && (
-                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-100 text-[#016098]">
-                    Promedio Demora de Pago: {promedioDiasDemora} días
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-[#64748b] mt-0.5">
-                Filtre por situación de cobro o escenario de rechazo (Recuperables Vigentes vs. Incobrables No Vigentes), ordene por demora o exporte a Excel
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={exportarDetalleExcel}
-                disabled={registrosDetalleFiltrados.length === 0}
-                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm disabled:opacity-50"
-              >
-                Exportar Detalle a Excel ({registrosDetalleFiltrados.length})
-              </button>
-              <button
-                onClick={() => setMostrarDetalle(false)}
-                className="px-3 py-1.5 border border-[#cbd5e1] text-[#475569] text-xs font-bold rounded-lg hover:bg-white"
-              >
-                Cerrar Detalle ✕
-              </button>
+        {vistaInferior === 'grafico' && mesesData.length > 0 ? (
+          <div className="bg-[#f8fafc] rounded-xl p-4 border border-[#e2e8f0]">
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={mesesData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="MesCorto" tick={{ fontSize: 11, fill: '#475569' }} />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: '#475569' }}
+                    tickFormatter={val => `$${Math.round(val / 1000000)}M`}
+                  />
+                  <RechartsTooltip
+                    formatter={(value: any) => formatCLP(Number(value))}
+                    contentStyle={{ borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '12px' }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '12px' }} />
+                  <Bar dataKey="EstimadoNoRechazado" name="Estimado No Rechazadas ($)" fill="#016098" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="PagadoSaludTotal" name="Pagado por Inst. de Salud ($)" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="FaltaPorCobrar" name="Falta por Cobrar Inst. Salud ($)" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
-
-          {/* Barra de filtros del detalle */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap gap-1.5">
-              {[
-                { id: 'todas', label: `Todas (${registrosDetalle.length})` },
-                {
-                  id: 'por-cobrar',
-                  label: `Por Cobrar Salud (${registrosDetalle.filter(r => Number(r.FaltaPorCobrar || 0) > 0 && !r.Rechazo).length})`
-                },
-                {
-                  id: 'sin-pago',
-                  label: `Sin Pago $0 No Rech. (${registrosDetalle.filter(r => Number(r.MontoPagado || 0) === 0 && !r.Rechazo).length})`
-                },
-                {
-                  id: 'rech-recuperables',
-                  label: `Rech. Recuperables Vigentes (${registrosDetalle.filter(r => r.EscenarioCobro === 'RECHAZADA_RECUPERABLE').length})`
-                },
-                {
-                  id: 'rech-incobrables',
-                  label: `Rech. Incobrables No Vig. (${registrosDetalle.filter(r => r.EscenarioCobro === 'RECHAZADA_INCOBRABLE').length})`
-                },
-                {
-                  id: 'rech-recuperadas',
-                  label: `Rech. Recuperadas (${registrosDetalle.filter(r => r.EscenarioCobro === 'RECHAZADA_RECUPERADA').length})`
-                },
-                {
-                  id: 'rechazadas',
-                  label: `Total Rechazadas (${registrosDetalle.filter(r => r.Rechazo).length})`
-                },
-                {
-                  id: 'pagadas',
-                  label: `Con Pago (${registrosDetalle.filter(r => Number(r.MontoPagado || 0) > 0).length})`
-                }
-              ].map(f => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => setFiltroEstadoDet(f.id as FiltroDetalleTipo)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                    filtroEstadoDet === f.id
-                      ? 'bg-[#016098] text-white shadow-sm'
-                      : 'bg-white border border-[#cbd5e1] text-[#475569] hover:bg-[#f1f5f9]'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={busquedaDet}
-                onChange={e => setBusquedaDet(e.target.value)}
-                placeholder="Buscar N° Licencia, RUT, Nombre, Salud, Obs Compin..."
-                className="w-72 px-3 py-1.5 text-xs border border-[#cbd5e1] rounded-lg bg-white"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (ordenCampoDet === 'fecha') {
-                    setOrdenFechaDet(prev => (prev === 'desc' ? 'asc' : 'desc'));
-                  } else {
-                    setOrdenCampoDet('fecha');
-                    setOrdenFechaDet('desc');
-                  }
-                }}
-                className={`px-3 py-1.5 border text-xs font-bold rounded-lg ${
-                  ordenCampoDet === 'fecha'
-                    ? 'bg-[#016098] text-white border-[#016098]'
-                    : 'bg-white border-[#cbd5e1] text-[#016098] hover:bg-[#f1f5f9]'
-                }`}
-              >
-                Fecha {ordenCampoDet === 'fecha' ? (ordenFechaDet === 'desc' ? '▼' : '▲') : ''}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (ordenCampoDet === 'demora') {
-                    setOrdenFechaDet(prev => (prev === 'desc' ? 'asc' : 'desc'));
-                  } else {
-                    setOrdenCampoDet('demora');
-                    setOrdenFechaDet('desc');
-                  }
-                }}
-                className={`px-3 py-1.5 border text-xs font-bold rounded-lg ${
-                  ordenCampoDet === 'demora'
-                    ? 'bg-[#016098] text-white border-[#016098]'
-                    : 'bg-white border-[#cbd5e1] text-[#016098] hover:bg-[#f1f5f9]'
-                }`}
-              >
-                Demora Pago {ordenCampoDet === 'demora' ? (ordenFechaDet === 'desc' ? '▼' : '▲') : ''}
-              </button>
-            </div>
-          </div>
-
-          {/* Grilla Detalle */}
-          <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl bg-white max-h-[480px]">
+        ) : (
+          <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl">
             <table className="w-full text-left text-xs">
-              <thead className="bg-[#f1f5f9] text-[#475569] font-bold sticky top-0">
+              <thead className="bg-[#f1f5f9] text-[#475569] font-bold">
                 <tr>
-                  <th className="p-2.5">N° Licencia</th>
-                  <th className="p-2.5">RUT</th>
-                  <th className="p-2.5">Funcionario</th>
-                  <th className="p-2.5 text-center">Vigencia</th>
-                  <th className="p-2.5">Situación Cobro / Rechazo</th>
-                  <th className="p-2.5">Establecimiento</th>
-                  <th className="p-2.5">Salud</th>
-                  <th className="p-2.5">Recepción</th>
-                  <th className="p-2.5">Desde</th>
-                  <th className="p-2.5">Fecha Pago</th>
-                  <th className="p-2.5 text-center">Demora Pago</th>
-                  <th className="p-2.5 text-center">Días</th>
-                  <th className="p-2.5 text-right">Pago Estimado</th>
-                  <th className="p-2.5 text-right">Pago Recibido</th>
-                  <th className="p-2.5 text-right">Saldo Pendiente</th>
-                  <th className="p-2.5 text-center">% Pago</th>
-                  <th className="p-2.5">Observación Compin</th>
+                  <th className="p-2.5">Mes</th>
+                  <th className="p-2.5 text-center">Lic. Tramitadas</th>
+                  <th className="p-2.5 text-right">Estimado (No Rech.)</th>
+                  <th className="p-2.5 text-right">Pagado Inst. Salud</th>
+                  <th className="p-2.5 text-right">Falta Cobrar Inst. Salud</th>
+                  <th className="p-2.5 text-right">Recup. Desc. Func.</th>
+                  <th className="p-2.5 text-center">Rechazadas (Vig. / Incob.)</th>
+                  <th className="p-2.5 text-center">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#e2e8f0]">
-                {cargandoDetalle ? (
+                {cargando ? (
                   <tr>
-                    <td colSpan={17} className="p-6 text-center text-[#64748b]">
-                      Cargando detalle de licencias con convenio...
-                    </td>
-                  </tr>
-                ) : registrosDetalleFiltrados.length === 0 ? (
-                  <tr>
-                    <td colSpan={17} className="p-6 text-center text-[#94a3b8]">
-                      No se encontraron licencias para los filtros seleccionados
+                    <td colSpan={8} className="p-6 text-center text-[#64748b]">
+                      Calculando resumen mensual...
                     </td>
                   </tr>
                 ) : (
-                  registrosDetalleFiltrados.slice(0, 500).map(r => {
-                    const est = Number(r.PagoEstimado || 0);
-                    const pag = Number(r.MontoPagado || 0);
-                    const saldoPend = Number(r.SaldoPendiente ?? r.FaltaPorCobrar ?? 0);
-                    const pct = est > 0 ? Math.round((pag / est) * 100) : 0;
-                    const demora =
-                      r.DiasDemoraPago !== null && r.DiasDemoraPago !== undefined ? Number(r.DiasDemoraPago) : null;
-                    const esVigente = r.Vigencia === 'S';
+                  mesesData.map(m => {
+                    const activo = mesSeleccionado === m.Mes;
                     return (
-                      <tr key={r.NumeroLicencia} className="hover:bg-[#f8fafc]">
-                        <td className="p-2.5 font-bold text-[#016098]">{r.NumeroLicencia}</td>
-                        <td className="p-2.5 whitespace-nowrap">
-                          {r.Rut}-{r.DV}
+                      <tr
+                        key={m.Mes}
+                        onClick={() => setMesSeleccionado(m.Mes === mesSeleccionado ? 0 : m.Mes)}
+                        className={`cursor-pointer transition-colors ${
+                          activo ? 'bg-sky-50 font-semibold' : 'hover:bg-[#f8fafc]'
+                        }`}
+                      >
+                        <td className="p-2.5 font-bold text-[#016098]">{m.MesNombre}</td>
+                        <td className="p-2.5 text-center font-bold">{m.TotalLicencias.toLocaleString('es-CL')}</td>
+                        <td className="p-2.5 text-right font-semibold">{formatCLP(m.EstimadoNoRechazado)}</td>
+                        <td className="p-2.5 text-right font-bold text-emerald-700">{formatCLP(m.PagadoSaludTotal)}</td>
+                        <td className="p-2.5 text-right font-bold text-amber-700">{formatCLP(m.FaltaPorCobrar)}</td>
+                        <td className="p-2.5 text-right font-semibold text-indigo-700">
+                          {formatCLP(m.PagadoDescuentoFunc)}
                         </td>
-                        <td className="p-2.5 font-semibold truncate max-w-[170px]" title={r.Funcionario}>
-                          {r.Funcionario}
-                        </td>
-                        <td className="p-2.5 text-center whitespace-nowrap">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              esVigente ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                            }`}
-                          >
-                            {esVigente ? 'Vigente' : 'No Vigente'}
+                        <td className="p-2.5 text-center">
+                          <span className="font-bold text-slate-700">{m.LicenciasRechazadas}</span>{' '}
+                          <span className="text-[11px] text-[#64748b]">
+                            (<span className="text-indigo-700 font-bold">{m.RechazadasRecuperablesCant}</span> vig. /{' '}
+                            <span className="text-rose-700 font-bold">{m.RechazadasIncobrablesCant}</span> incob.)
                           </span>
                         </td>
-                        <td className="p-2.5 whitespace-nowrap">
-                          {r.EscenarioCobro === 'RECHAZADA_RECUPERABLE' ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900">
-                              Rech. Recuperable (Desc. Remun.)
-                            </span>
-                          ) : r.EscenarioCobro === 'RECHAZADA_INCOBRABLE' ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900">
-                              Rech. Incobrable (No Vigente)
-                            </span>
-                          ) : r.EscenarioCobro === 'RECHAZADA_RECUPERADA' ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900">
-                              Rech. Ya Recuperada
-                            </span>
-                          ) : r.EscenarioCobro === 'POR_COBRAR_SALUD' ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">
-                              Por Cobrar Salud
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
-                              {r.SituacionCobroLabel || 'Pagada'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-2.5 truncate max-w-[140px]" title={r.Establecimiento}>
-                          {r.Establecimiento}
-                        </td>
-                        <td className="p-2.5">{r.Salud}</td>
-                        <td className="p-2.5 whitespace-nowrap">{formatDateDDMMYYYY(r.Recepcion)}</td>
-                        <td className="p-2.5 whitespace-nowrap">{formatDateDDMMYYYY(r.Desde)}</td>
-                        <td className="p-2.5 whitespace-nowrap font-semibold text-emerald-700">
-                          {r.FechaPago ? (
-                            formatDateDDMMYYYY(r.FechaPago)
-                          ) : (
-                            <span className="text-slate-400 font-normal">Sin pago</span>
-                          )}
-                        </td>
-                        <td className="p-2.5 text-center whitespace-nowrap">
-                          {demora !== null ? (
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                                demora <= 30
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : demora <= 60
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-rose-100 text-rose-800'
-                              }`}
-                              title="Días transcurridos entre Fecha de Recepción de la licencia y Fecha de Pago"
-                            >
-                              {demora} días
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">-</span>
-                          )}
-                        </td>
-                        <td className="p-2.5 text-center">{r.NumDias}</td>
-                        <td className="p-2.5 text-right">{formatCLP(est)}</td>
-                        <td className="p-2.5 text-right font-bold text-emerald-700">{formatCLP(pag)}</td>
-                        <td className="p-2.5 text-right font-bold text-amber-700">{formatCLP(saldoPend)}</td>
-                        <td className="p-2.5 text-center font-bold">{pct}%</td>
-                        <td className="p-2.5 truncate max-w-[200px] text-[#016098]" title={r.Observacion_Compin}>
-                          {r.Observacion_Compin || r.Obser_apelacion || '-'}
+                        <td className="p-2.5 text-center" onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => abrirModalDetalle(m.Mes, 'todas')}
+                            className="px-3 py-1 bg-[#016098] hover:bg-[#014b78] text-white text-[11px] font-bold rounded-md transition-colors"
+                          >
+                            Abrir Detalle
+                          </button>
                         </td>
                       </tr>
                     );
                   })
                 )}
+
+                {totalesAnuales && !cargando && (
+                  <tr className="bg-[#f1f5f9] font-extrabold text-[#1e293b] border-t-2 border-[#cbd5e1]">
+                    <td className="p-2.5 text-[#016098]">TOTAL {anio}</td>
+                    <td className="p-2.5 text-center">{totalesAnuales.TotalLicencias.toLocaleString('es-CL')}</td>
+                    <td className="p-2.5 text-right">{formatCLP(totalesAnuales.EstimadoNoRechazado)}</td>
+                    <td className="p-2.5 text-right text-emerald-700">{formatCLP(totalesAnuales.PagadoSaludTotal)}</td>
+                    <td className="p-2.5 text-right text-amber-700">{formatCLP(totalesAnuales.FaltaPorCobrar)}</td>
+                    <td className="p-2.5 text-right text-indigo-700">{formatCLP(totalesAnuales.PagadoDescuentoFunc)}</td>
+                    <td className="p-2.5 text-center">
+                      {totalesAnuales.LicenciasRechazadas} (
+                      <span className="text-indigo-700">{totalesAnuales.RechazadasRecuperablesCant}</span> vig. /{' '}
+                      <span className="text-rose-700">{totalesAnuales.RechazadasIncobrablesCant}</span> incob.)
+                    </td>
+                    <td className="p-2.5 text-center">
+                      <button
+                        type="button"
+                        onClick={() => abrirModalDetalle(0, 'todas')}
+                        className="px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold rounded-md"
+                      >
+                        Abrir Todo {anio}
+                      </button>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* 5. VENTANA MODAL FLOTANTE PARA VER EL DETALLE DE LICENCIAS SIN BAJAR EN LA PÁGINA */}
+      {mostrarDetalle && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/65 backdrop-blur-xs p-3 sm:p-6"
+          onClick={() => setMostrarDetalle(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-7xl max-h-[92vh] flex flex-col overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Cabecera del Modal */}
+            <div className="bg-[#f8fafc] px-6 py-4 border-b border-[#e2e8f0] flex flex-col md:flex-row md:items-center md:justify-between gap-3 shrink-0">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#016098] text-white uppercase">
+                    {mesDetalle > 0
+                      ? `${mesesData.find(m => m.Mes === mesDetalle)?.MesNombre || ''} ${anio}`
+                      : `Año Completo ${anio}`}
+                  </span>
+                  <h3 className="text-base font-extrabold text-[#1e293b]">
+                    {ETIQUETAS_FILTRO[filtroEstadoDet]}
+                  </h3>
+                  {promedioDiasDemora !== null && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-100 text-[#016098]">
+                      Demora Promedio Pago: {promedioDiasDemora} días
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-[#64748b] mt-1">
+                  Mostrando <b>{registrosDetalleFiltrados.length.toLocaleString('es-CL')}</b> licencias · Estimado:{' '}
+                  <b>{formatCLP(sumaEstimadoModal)}</b> · Pagado Inst. de Salud:{' '}
+                  <b className="text-emerald-700">{formatCLP(sumaSaludModal)}</b> · Desc. Funcionario:{' '}
+                  <b className="text-indigo-700">{formatCLP(sumaDescModal)}</b> · Saldo Pendiente:{' '}
+                  <b className="text-amber-700">{formatCLP(sumaPendModal)}</b>
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={exportarDetalleExcel}
+                  disabled={registrosDetalleFiltrados.length === 0}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs disabled:opacity-50"
+                >
+                  Descargar a Excel ({registrosDetalleFiltrados.length})
+                </button>
+                <button
+                  onClick={() => setMostrarDetalle(false)}
+                  className="px-3.5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold rounded-lg"
+                >
+                  Cerrar Ventana ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Barra de Filtros Rápidos y Buscador dentro del Modal */}
+            <div className="px-6 py-3 bg-white border-b border-[#e2e8f0] flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 shrink-0">
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { id: 'todas', label: `Todas (${registrosDetalle.length})` },
+                  {
+                    id: 'por-cobrar',
+                    label: `Por Cobrar Inst. Salud (${registrosDetalle.filter(r => Number(r.FaltaPorCobrar || 0) > 0 && !r.Rechazo).length})`
+                  },
+                  {
+                    id: 'rech-recuperables',
+                    label: `🟦 Rech. Recuperables Vigentes (${registrosDetalle.filter(r => r.EscenarioCobro === 'RECHAZADA_RECUPERABLE').length})`
+                  },
+                  {
+                    id: 'rech-incobrables',
+                    label: `🟥 Rech. Incobrables No Vig. (${registrosDetalle.filter(r => r.EscenarioCobro === 'RECHAZADA_INCOBRABLE').length})`
+                  },
+                  {
+                    id: 'rech-recuperadas',
+                    label: `🟩 Rech. Recuperadas Desc. (${registrosDetalle.filter(r => r.EscenarioCobro === 'RECHAZADA_RECUPERADA').length})`
+                  },
+                  {
+                    id: 'falso-rechazo-salud',
+                    label: `🟧 Falsos Rechazos Pag. Inst. Salud (${registrosDetalle.filter(r => r.EsFalsoRechazoPagado).length})`
+                  },
+                  {
+                    id: 'falso-rechazo-doble',
+                    label: `🚨 Doble Cobro (${registrosDetalle.filter(r => r.EsDobleCobro).length})`
+                  },
+                  {
+                    id: 'falso-rechazo-compin',
+                    label: `✅ COMPIN Autorizada (${registrosDetalle.filter(r => r.EsFalsoRechazoCompin).length})`
+                  }
+                ].map(f => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setFiltroEstadoDet(f.id as FiltroDetalleTipo)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                      filtroEstadoDet === f.id
+                        ? 'bg-[#016098] text-white shadow-2xs'
+                        : 'bg-slate-100 text-[#475569] hover:bg-slate-200'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <input
+                  type="text"
+                  value={busquedaDet}
+                  onChange={e => setBusquedaDet(e.target.value)}
+                  placeholder="Buscar licencia, RUT, funcionario, establecimiento..."
+                  className="w-64 px-3 py-1.5 text-xs border border-[#cbd5e1] rounded-lg bg-[#f8fafc]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (ordenCampoDet === 'fecha') {
+                      setOrdenFechaDet(prev => (prev === 'desc' ? 'asc' : 'desc'));
+                    } else {
+                      setOrdenCampoDet('fecha');
+                      setOrdenFechaDet('desc');
+                    }
+                  }}
+                  className={`px-2.5 py-1.5 border text-xs font-bold rounded-lg ${
+                    ordenCampoDet === 'fecha'
+                      ? 'bg-[#016098] text-white border-[#016098]'
+                      : 'bg-white border-[#cbd5e1] text-[#016098]'
+                  }`}
+                >
+                  Fecha {ordenCampoDet === 'fecha' ? (ordenFechaDet === 'desc' ? '▼' : '▲') : ''}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (ordenCampoDet === 'demora') {
+                      setOrdenFechaDet(prev => (prev === 'desc' ? 'asc' : 'desc'));
+                    } else {
+                      setOrdenCampoDet('demora');
+                      setOrdenFechaDet('desc');
+                    }
+                  }}
+                  className={`px-2.5 py-1.5 border text-xs font-bold rounded-lg ${
+                    ordenCampoDet === 'demora'
+                      ? 'bg-[#016098] text-white border-[#016098]'
+                      : 'bg-white border-[#cbd5e1] text-[#016098]'
+                  }`}
+                >
+                  Demora {ordenCampoDet === 'demora' ? (ordenFechaDet === 'desc' ? '▼' : '▲') : ''}
+                </button>
+              </div>
+            </div>
+
+            {/* Tabla con Scroll Interno dentro del Modal */}
+            <div className="overflow-auto flex-1">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[#f1f5f9] text-[#475569] font-bold sticky top-0 z-10 shadow-2xs">
+                  <tr>
+                    <th className="p-2.5">N° Licencia</th>
+                    <th className="p-2.5">RUT</th>
+                    <th className="p-2.5">Funcionario</th>
+                    <th className="p-2.5 text-center">Vigencia</th>
+                    <th className="p-2.5">Situación</th>
+                    <th className="p-2.5">Inst. de Salud</th>
+                    <th className="p-2.5">Desde</th>
+                    <th className="p-2.5">Fecha Pago</th>
+                    <th className="p-2.5 text-center">Demora</th>
+                    <th className="p-2.5 text-center">Días</th>
+                    <th className="p-2.5 text-right">Pago Estimado</th>
+                    <th className="p-2.5 text-right">Pagado Inst. Salud</th>
+                    <th className="p-2.5 text-right">Desc. Funcionario</th>
+                    <th className="p-2.5 text-right">Saldo Pendiente</th>
+                    <th className="p-2.5">Observación Compin</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#e2e8f0]">
+                  {cargandoDetalle ? (
+                    <tr>
+                      <td colSpan={15} className="p-12 text-center text-[#64748b] font-semibold">
+                        Cargando listado de licencias...
+                      </td>
+                    </tr>
+                  ) : registrosDetalleFiltrados.length === 0 ? (
+                    <tr>
+                      <td colSpan={15} className="p-12 text-center text-[#94a3b8]">
+                        No hay registros para el filtro seleccionado.
+                      </td>
+                    </tr>
+                  ) : (
+                    registrosDetalleFiltrados.slice(0, 500).map(r => {
+                      const est = Number(r.PagoEstimado || 0);
+                      const pagSalud = Number(r.PagadoSalud || 0);
+                      const pagDesc = Number(r.PagadoDescuento || 0);
+                      const saldoPend = Number(r.SaldoPendiente ?? r.FaltaPorCobrar ?? 0);
+                      const demora =
+                        r.DiasDemoraPago !== null && r.DiasDemoraPago !== undefined ? Number(r.DiasDemoraPago) : null;
+                      const esVigente = r.Vigencia === 'S';
+                      return (
+                        <tr key={r.NumeroLicencia} className="hover:bg-sky-50/50">
+                          <td className="p-2.5 font-bold text-[#016098]">{r.NumeroLicencia}</td>
+                          <td className="p-2.5 whitespace-nowrap">
+                            {r.Rut}-{r.DV}
+                          </td>
+                          <td className="p-2.5 font-semibold truncate max-w-[180px]" title={r.Funcionario}>
+                            {r.Funcionario}
+                          </td>
+                          <td className="p-2.5 text-center whitespace-nowrap">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                esVigente ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                              }`}
+                            >
+                              {esVigente ? 'Vigente' : 'No Vigente'}
+                            </span>
+                          </td>
+                          <td className="p-2.5 whitespace-nowrap">
+                            {r.EsDobleCobro ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900 border border-rose-300">
+                                🚨 Doble Cobro (Inst. Salud + Desc.)
+                              </span>
+                            ) : r.EsFalsoRechazoPagado ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-900 border border-orange-300">
+                                ⚠️ Falso Rech. (Pagó Inst. Salud)
+                              </span>
+                            ) : r.EsFalsoRechazoCompin ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-100 text-teal-900">
+                                ✅ COMPIN Autorizada
+                              </span>
+                            ) : r.EscenarioCobro === 'RECHAZADA_RECUPERABLE' ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900">
+                                Rech. Recuperable (Vigente)
+                              </span>
+                            ) : r.EscenarioCobro === 'RECHAZADA_INCOBRABLE' ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900">
+                                Rech. Incobrable (No Vigente)
+                              </span>
+                            ) : r.EscenarioCobro === 'RECHAZADA_RECUPERADA' ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900">
+                                Rech. Recuperada (Desc.)
+                              </span>
+                            ) : r.EscenarioCobro === 'POR_COBRAR_SALUD' ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">
+                                Por Cobrar Inst. Salud
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
+                                {r.SituacionCobroLabel || 'Pagada'}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-2.5">{r.Salud}</td>
+                          <td className="p-2.5 whitespace-nowrap">{formatDateDDMMYYYY(r.Desde)}</td>
+                          <td className="p-2.5 whitespace-nowrap font-semibold text-emerald-700">
+                            {r.FechaPago ? (
+                              formatDateDDMMYYYY(r.FechaPago)
+                            ) : (
+                              <span className="text-slate-400 font-normal">Sin pago</span>
+                            )}
+                          </td>
+                          <td className="p-2.5 text-center whitespace-nowrap">
+                            {demora !== null ? (
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                  demora <= 30
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : demora <= 60
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-rose-100 text-rose-800'
+                                }`}
+                              >
+                                {demora} d
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
+                          <td className="p-2.5 text-center">{r.NumDias}</td>
+                          <td className="p-2.5 text-right">{formatCLP(est)}</td>
+                          <td className="p-2.5 text-right font-bold text-emerald-700">{formatCLP(pagSalud)}</td>
+                          <td className="p-2.5 text-right font-bold text-indigo-700">{formatCLP(pagDesc)}</td>
+                          <td className="p-2.5 text-right font-bold text-amber-700">{formatCLP(saldoPend)}</td>
+                          <td className="p-2.5 truncate max-w-[200px] text-[#016098]" title={r.Observacion_Compin}>
+                            {r.Observacion_Compin || r.Obser_apelacion || '-'}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
             {registrosDetalleFiltrados.length > 500 && (
-              <div className="p-2.5 bg-amber-50 text-amber-900 text-xs text-center font-medium border-t border-amber-200">
+              <div className="px-6 py-2 bg-amber-50 text-amber-900 text-xs text-center font-medium border-t border-amber-200 shrink-0">
                 Mostrando las primeras 500 filas en pantalla para fluidez visual. Al presionar{' '}
-                <b>Exportar Detalle a Excel</b> se descargan los <b>{registrosDetalleFiltrados.length}</b> registros completos.
+                <b>Descargar a Excel</b> se exportan los <b>{registrosDetalleFiltrados.length}</b> registros completos.
               </div>
             )}
           </div>
