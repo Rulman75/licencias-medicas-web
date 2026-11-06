@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { exportToCorporatePDF } from '../utils/exportUtils';
 
 interface PreviewItem {
   NumeroLicencia: string;
@@ -157,13 +158,42 @@ export default function CargaReposo() {
 
     return (
       <div className="flex flex-col gap-2">
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
           <button 
             onClick={() => exportToExcel(data, tabName)}
-            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded border border-gray-300 flex items-center gap-1 font-semibold"
+            className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 font-bold"
           >
-            <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-            Exportar Excel
+            📊 Exportar Excel
+          </button>
+          <button
+            onClick={() =>
+              exportToCorporatePDF({
+                title: `Previsualización Carga Órdenes de Reposo — ${tabName.toUpperCase()}`,
+                subtitle: `Archivo Siniestros: ${fileSiniestros?.name || '-'} | Accidentabilidad: ${fileAccidentabilidad?.name || '-'}`,
+                orientation: 'landscape',
+                columns: [
+                  { header: 'N° Licencia', key: 'NumeroLicencia' },
+                  { header: 'RUT', key: 'RutFuncionario' },
+                  { header: 'Nombre', key: 'Nombre' },
+                  { header: 'Días', key: 'NumDias', align: 'center' },
+                  ...(showCalculoSistema
+                    ? [{ header: 'Días Cálculo Sistema', key: 'DiasCalculoSistema', align: 'center' as const }]
+                    : []),
+                  { header: 'Desde (Excel)', key: 'Desde', align: 'center', format: (v: any) => formatDate(v) },
+                  { header: 'Hasta (Excel)', key: 'Hasta', align: 'center', format: (v: any) => formatDate(v) },
+                  ...(isModified
+                    ? [
+                        { header: 'Desde (BD)', key: 'DbDesde', align: 'center' as const, format: (v: any) => formatDate(v) },
+                        { header: 'Hasta (BD)', key: 'DbHasta', align: 'center' as const, format: (v: any) => formatDate(v) }
+                      ]
+                    : [])
+                ],
+                rows: data
+              })
+            }
+            className="text-xs bg-[#016098] hover:bg-[#014b78] text-white px-3 py-1.5 rounded-lg flex items-center gap-1 font-bold"
+          >
+            📄 Exportar PDF
           </button>
         </div>
         <div className="overflow-auto max-h-[500px] border border-gray-200 rounded-lg">

@@ -289,6 +289,32 @@ export default function CertificadosNominas({ tabInicial = 'certificado' }: Cert
             {datosCertificado && (
               <div className="flex gap-2">
                 <button
+                  onClick={() => {
+                    const rows = datosCertificado.rentas.map((r: any) => ({
+                      'N° Licencia': datosCertificado.licencia.NumeroLicencia,
+                      'RUT': `${datosCertificado.licencia.Rut}-${datosCertificado.licencia.DV}`,
+                      'Funcionario': `${datosCertificado.licencia.Nombre} ${datosCertificado.licencia.Paterno} ${datosCertificado.licencia.Materno}`.trim(),
+                      'Mes / Año': `${nombreMes(r.Mes)} ${r.Anio}`,
+                      'Días Trab.': r.DiasTrab,
+                      'Renta Imponible ($)': Number(r.MontoImponible || 0),
+                      'Cotiz. AFP ($)': Number(r.DescPrevision || 0),
+                      'Cotiz. Salud ($)': Number(r.DescSalud || 0),
+                      'Impuesto Único ($)': Number(r.ImpuestoUnico || 0),
+                      'Remuneración Neta ($)': Number(r.MontoNeto || 0),
+                      'Promedio Neto Diario ($)': Number(datosCertificado.licencia.MontoNetoPromedio || 0),
+                      'Subsidio Diario ($)': Number(datosCertificado.licencia.SubsidioDiario || 0),
+                      'Pago Estimado Total ($)': Number(datosCertificado.licencia.PagoEstimado || 0)
+                    }));
+                    const ws = XLSX.utils.json_to_sheet(rows);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, 'Certificado_Base');
+                    XLSX.writeFile(wb, `Certificado_Base_Licencia_${datosCertificado.licencia.NumeroLicencia}.xlsx`);
+                  }}
+                  className="px-4 py-2.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 flex items-center gap-2 shadow-sm"
+                >
+                  📊 Exportar Excel
+                </button>
+                <button
                   onClick={() => window.print()}
                   className="px-4 py-2.5 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78] flex items-center gap-2 shadow-sm"
                 >
@@ -301,15 +327,18 @@ export default function CertificadosNominas({ tabInicial = 'certificado' }: Cert
           {/* Documento Formal Imprimible */}
           {datosCertificado && (
             <div className="print-container bg-white rounded-xl shadow-sm border border-[#cbd5e1] p-8 max-w-4xl mx-auto text-[#1e293b] space-y-6">
-              {/* Membrete Empleador */}
-              <div className="flex justify-between items-start border-b-2 border-[#016098] pb-4">
-                <div>
-                  <p className="text-xs font-bold text-[#016098]">
-                    RAZÓN SOCIAL DEL EMPLEADOR: CORPORACIÓN MUNICIPAL DE DESARROLLO SOCIAL
-                  </p>
-                  <p className="text-xs font-semibold text-[#475569]">
-                    R.U.T N° 71.102.600-2 — DOMICILIO: AV. ARGENTINA 1595 2° PISO, ANTOFAGASTA
-                  </p>
+              {/* Membrete Empleador con Logo Institucional */}
+              <div className="flex justify-between items-center border-b-2 border-[#016098] pb-4 gap-4">
+                <div className="flex items-center gap-3">
+                  <img src="/logo.png" alt="Logo CMDS" className="h-12 w-auto object-contain" />
+                  <div>
+                    <p className="text-xs font-bold text-[#016098]">
+                      RAZÓN SOCIAL DEL EMPLEADOR: CORPORACIÓN MUNICIPAL DE DESARROLLO SOCIAL
+                    </p>
+                    <p className="text-xs font-semibold text-[#475569]">
+                      R.U.T N° 71.102.600-2 — DOMICILIO: AV. ARGENTINA 1595 2° PISO, ANTOFAGASTA
+                    </p>
+                  </div>
                 </div>
                 <div className="text-right text-xs text-[#64748b]">
                   <p>Fecha Emisión: {formatDateDDMMYYYY(todayStr)}</p>
@@ -527,14 +556,17 @@ export default function CertificadosNominas({ tabInicial = 'certificado' }: Cert
 
           {registrosNominaNormal.length > 0 && (
             <div className="print-container bg-white rounded-xl shadow-sm border border-[#cbd5e1] p-8 space-y-6">
-              <div className="flex justify-between items-center border-b-2 border-[#016098] pb-4">
-                <div>
-                  <h2 className="text-base font-extrabold text-[#016098] uppercase">
-                    NÓMINA DE FUNCIONARIOS CON LICENCIAS MÉDICAS
-                  </h2>
-                  <p className="text-xs text-[#475569] font-semibold">
-                    CORPORACIÓN MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA
-                  </p>
+              <div className="flex justify-between items-center border-b-2 border-[#016098] pb-4 gap-4">
+                <div className="flex items-center gap-3">
+                  <img src="/logo.png" alt="Logo CMDS" className="h-12 w-auto object-contain" />
+                  <div>
+                    <h2 className="text-base font-extrabold text-[#016098] uppercase">
+                      NÓMINA DE FUNCIONARIOS CON LICENCIAS MÉDICAS
+                    </h2>
+                    <p className="text-xs text-[#475569] font-semibold">
+                      CORPORACIÓN MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA — UNIDAD DE LICENCIAS MÉDICAS
+                    </p>
+                  </div>
                 </div>
                 <div className="text-right text-xs">
                   <p>
@@ -658,14 +690,17 @@ export default function CertificadosNominas({ tabInicial = 'certificado' }: Cert
 
           {registrosNominaPD.length > 0 && (
             <div className="print-container bg-white rounded-xl shadow-sm border border-[#cbd5e1] p-8 space-y-6">
-              <div className="flex justify-between items-center border-b-2 border-[#016098] pb-4">
-                <div>
-                  <h2 className="text-base font-extrabold text-[#016098] uppercase">
-                    NÓMINA DE FUNCIONARIOS CON LICENCIAS MÉDICAS PAGO DIRECTO
-                  </h2>
-                  <p className="text-xs text-[#475569] font-semibold">
-                    CORPORACIÓN MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA
-                  </p>
+              <div className="flex justify-between items-center border-b-2 border-[#016098] pb-4 gap-4">
+                <div className="flex items-center gap-3">
+                  <img src="/logo.png" alt="Logo CMDS" className="h-12 w-auto object-contain" />
+                  <div>
+                    <h2 className="text-base font-extrabold text-[#016098] uppercase">
+                      NÓMINA DE FUNCIONARIOS CON LICENCIAS MÉDICAS PAGO DIRECTO
+                    </h2>
+                    <p className="text-xs text-[#475569] font-semibold">
+                      CORPORACIÓN MUNICIPAL DE DESARROLLO SOCIAL DE ANTOFAGASTA — UNIDAD DE LICENCIAS MÉDICAS
+                    </p>
+                  </div>
                 </div>
                 <div className="text-right text-xs">
                   <p>

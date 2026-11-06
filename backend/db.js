@@ -133,6 +133,10 @@ function translateSingleTSqlToPostgres(queryText, paramsMap) {
         /\bCOALESCE\s*\(\s*([A-Za-z0-9_.]*(?:Rechazo|regularizado|Maternal|Parcial|Retenida|Pendiente|Descuento))\s*,\s*0\s*\)/gi,
         '(CASE WHEN COALESCE($1::boolean, false) THEN 1 ELSE 0 END)'
     );
+    q = q.replace(
+        /\b([A-Za-z0-9_.]*(?:Rechazo|regularizado|Maternal|Parcial|Retenida|Pendiente|Descuento))\s*=\s*([01])\b/gi,
+        (_, col, bitVal) => `${col} = ${bitVal === '1' ? 'true' : 'false'}`
+    );
     q = q.replace(/\bGETDATE\s*\(\s*\)/gi, 'CURRENT_TIMESTAMP');
     q = q.replace(/\bLEN\s*\(/gi, 'LENGTH(');
     q = q.replace(/\bYEAR\s*\(\s*CURRENT_TIMESTAMP\s*\)/gi, 'EXTRACT(YEAR FROM CURRENT_TIMESTAMP)::INT');
@@ -395,6 +399,8 @@ async function initPool() {
             `[MODO MARCHA BLANCA DUAL] Conectado simultáneamente a SQL Server (${rawServer} -> ${mssqlConfig.database}) y PostgreSQL (${pgConfig.host} -> ${pgConfig.database})`
         );
         return {
+            mssqlPool,
+            pgPool,
             request: () => new DualRequestWrapper(mssqlPool, pgPool),
             query: (q) => new DualRequestWrapper(mssqlPool, pgPool).query(q),
             close: async () => {

@@ -1032,14 +1032,14 @@ router.get('/bancos', async (req, res) => {
     }
 });
 
-// 11. Consultar Cheque / Documento (DETALLE_CHEQUES + LIC_DETALLE_PAGO_ACTUAL)
+// 11. Consultar Transferencia / Documento (DETALLE_CHEQUES + LIC_DETALLE_PAGO_ACTUAL)
 router.get('/cheque', async (req, res) => {
     try {
         const pool = req.db;
         const banco = String(req.query.banco || '').trim();
         const num = String(req.query.num || '').trim();
         if (!banco || !num) {
-            return res.status(400).json({ error: 'Banco y N° de Cheque/Documento son requeridos' });
+            return res.status(400).json({ error: 'Banco y N° de Transferencia/Documento son requeridos' });
         }
 
         const chRes = await pool.request()
@@ -1052,7 +1052,7 @@ router.get('/cheque', async (req, res) => {
                     ISNULL(monto, 0) as Monto,
                     ISNULL(saldo, 0) as SaldoTabla,
                     CONVERT(varchar, Fecha, 23) as Fecha,
-                    RTRIM(ISNULL(Tipo, 'Cheque')) as Tipo,
+                    RTRIM(ISNULL(Tipo, 'Transferencia')) as Tipo,
                     RTRIM(ISNULL(area, 'Educacion')) as Area,
                     RTRIM(ISNULL(estado, 'Abierto')) as Estado
                 FROM DETALLE_CHEQUES
@@ -1109,18 +1109,18 @@ router.get('/cheque', async (req, res) => {
             movimientos: movRes.recordset
         });
     } catch (err) {
-        console.error('Error consultando cheque:', err);
-        res.status(500).json({ error: 'Error consultando cheque/documento' });
+        console.error('Error consultando transferencia:', err);
+        res.status(500).json({ error: 'Error consultando transferencia/documento' });
     }
 });
 
-// 12. Registrar o Modificar Cheque (DETALLE_CHEQUES)
+// 12. Registrar o Modificar Transferencia / Documento (DETALLE_CHEQUES)
 router.post('/cheque', async (req, res) => {
     try {
         const pool = req.db;
         const { banco, num, monto, saldo, fecha, tipo, estado, area } = req.body;
         if (!banco || !num) {
-            return res.status(400).json({ error: 'Banco y N° de Cheque son obligatorios' });
+            return res.status(400).json({ error: 'Banco y N° de Transferencia son obligatorios' });
         }
 
         const checkRes = await pool.request()
@@ -1135,7 +1135,7 @@ router.post('/cheque', async (req, res) => {
                 .input('Monto', sql.Int, parseInt(monto || 0, 10))
                 .input('Saldo', sql.Int, parseInt(saldo || 0, 10))
                 .input('Fecha', sql.Date, fecha || new Date())
-                .input('Tipo', sql.NChar, String(tipo || 'Cheque').trim())
+                .input('Tipo', sql.NChar, String(tipo || 'Transferencia').trim())
                 .input('Estado', sql.NChar, String(estado || 'Abierto').trim())
                 .input('Area', sql.NChar, String(area || 'Educacion').trim())
                 .query(`
@@ -1143,7 +1143,7 @@ router.post('/cheque', async (req, res) => {
                     SET monto = @Monto, saldo = @Saldo, Fecha = @Fecha, Tipo = @Tipo, estado = @Estado, area = @Area
                     WHERE RTRIM(banco) = @Banco AND RTRIM(num) = @Num
                 `);
-            res.json({ status: 'ok', message: 'Documento modificado correctamente' });
+            res.json({ status: 'ok', message: 'Transferencia modificada correctamente' });
         } else {
             await pool.request()
                 .input('Banco', sql.NChar, banco.trim())
@@ -1151,25 +1151,26 @@ router.post('/cheque', async (req, res) => {
                 .input('Monto', sql.Int, parseInt(monto || 0, 10))
                 .input('Saldo', sql.Int, parseInt(saldo || 0, 10))
                 .input('Fecha', sql.Date, fecha || new Date())
-                .input('Tipo', sql.NChar, String(tipo || 'Cheque').trim())
+                .input('Tipo', sql.NChar, String(tipo || 'Transferencia').trim())
                 .input('Estado', sql.NChar, String(estado || 'Abierto').trim())
                 .input('Area', sql.NChar, String(area || 'Educacion').trim())
                 .query(`
                     INSERT INTO DETALLE_CHEQUES (banco, num, monto, saldo, Fecha, Tipo, estado, area)
                     VALUES (@Banco, @Num, @Monto, @Saldo, @Fecha, @Tipo, @Estado, @Area)
                 `);
-            res.json({ status: 'ok', message: 'Documento registrado correctamente' });
+            res.json({ status: 'ok', message: 'Transferencia registrada correctamente' });
         }
     } catch (err) {
-        console.error('Error guardando cheque:', err);
-        res.status(500).json({ error: 'Error al guardar el documento/cheque' });
+        console.error('Error guardando transferencia:', err);
+        res.status(500).json({ error: 'Error al guardar la transferencia/documento' });
     }
 });
 
-// 13. Ingresar Pago de Licencia (Frm_IngresoPago.vb Btn_Grabar_Click)
+// 13. Ingresar Pago de Licencia (Frm_IngresoPago.vb Btn_Grabar_Click + Autorización automática si estaba Rechazada)
 router.post('/pago', async (req, res) => {
     const pool = req.db;
-    const transaction = new sql.Transaction(pool);
+    const rawPool = pool.mssqlPool || pool;
+    const transaction = new sql.Transaction(rawPool);
     try {
         const b = req.body;
         const numeroLicencia = String(b.numeroLicencia || '').trim();
@@ -1180,12 +1181,12 @@ router.post('/pago', async (req, res) => {
         const monto = parseInt(b.monto || 0, 10);
 
         if (!numeroLicencia || !numeroDocumento) {
-            return res.status(400).json({ error: 'N° de Licencia y N° de Documento son obligatorios' });
+            return res.status(400).json({ error: 'N° de Licencia y N° de Transferencia/Documento son obligatorios' });
         }
 
         await transaction.begin();
 
-        // Verificar cheque si está asociado
+        // Verificar transferencia/documento si está asociado
         const chRes = await new sql.Request(transaction)
             .input('Banco', sql.NVarChar, banco)
             .input('Num', sql.NVarChar, numeroDocumento)
@@ -1199,11 +1200,11 @@ router.post('/pago', async (req, res) => {
             const ch = chRes.recordset[0];
             if (ch.Estado === 'Cerrado') {
                 await transaction.rollback();
-                return res.status(400).json({ error: 'El cheque está cerrado, no puede ingresar más documentos' });
+                return res.status(400).json({ error: 'La transferencia está cerrada, no puede ingresar más documentos' });
             }
             if (ch.Monto > 0 && monto > ch.Monto) {
                 await transaction.rollback();
-                return res.status(400).json({ error: 'No puede ingresar el pago: el monto es superior al monto del cheque' });
+                return res.status(400).json({ error: 'No puede ingresar el pago: el monto es superior al monto de la transferencia' });
             }
         }
 
@@ -1211,7 +1212,10 @@ router.post('/pago', async (req, res) => {
         const licRes = await new sql.Request(transaction)
             .input('Num', sql.NVarChar, numeroLicencia)
             .query(`
-                SELECT TOP 1 ISNULL(NumDias, 0) as NumDias, RTRIM(ISNULL(Obser_apelacion, '')) as ObserApelacion
+                SELECT TOP 1
+                    ISNULL(NumDias, 0) as NumDias,
+                    ISNULL(Rechazo, 0) as Rechazo,
+                    RTRIM(ISNULL(Obser_apelacion, '')) as ObserApelacion
                 FROM LIC_LICENCIA_ACTUAL
                 WHERE RTRIM(NumeroLicencia) = @Num
             `);
@@ -1230,6 +1234,9 @@ router.post('/pago', async (req, res) => {
             await transaction.rollback();
             return res.status(400).json({ error: 'Días por pagar no puede ser mayor a los días de licencia' });
         }
+
+        const eraRechazada = Number(licRes.recordset[0].Rechazo || 0) === 1;
+        const esPagoSalud = !['Descuento', 'DESCUENTO', 'Devolucion', 'DEVOLUCION'].includes(concepto) && monto > 0;
 
         const pagoActualRes = await new sql.Request(transaction)
             .input('Num', sql.NVarChar, numeroLicencia)
@@ -1302,6 +1309,27 @@ router.post('/pago', async (req, res) => {
                 )
             `);
 
+        // Si la licencia estaba Rechazada y recibe un pago por Subsidio o Aporte, pasa a Autorizada
+        if (eraRechazada && esPagoSalud) {
+            await new sql.Request(transaction)
+                .input('NumLicUpd', sql.NVarChar, numeroLicencia)
+                .query(`
+                    UPDATE LIC_LICENCIA_ACTUAL
+                    SET
+                        Rechazo = 0,
+                        Autorizada = 'True',
+                        Estado = 'AUT_PAGO_SALUD',
+                        Observacion_Compin = CASE
+                            WHEN ISNULL(Observacion_Compin, '') LIKE '%AUTORIZADA POR PAGO INST. SALUD%'
+                                THEN Observacion_Compin
+                            WHEN LTRIM(RTRIM(ISNULL(Observacion_Compin, ''))) = ''
+                                THEN '[AUTORIZADA POR PAGO INST. SALUD]'
+                            ELSE LEFT(RTRIM(Observacion_Compin) + ' | [AUTORIZADA POR PAGO INST. SALUD]', 1000)
+                        END
+                    WHERE RTRIM(NumeroLicencia) = @NumLicUpd
+                `);
+        }
+
         // Actualizar saldo en DETALLE_CHEQUES si existe el cheque
         if (chRes.recordset.length > 0 && concepto !== 'Devolucion') {
             const sumRes = await new sql.Request(transaction)
@@ -1325,9 +1353,36 @@ router.post('/pago', async (req, res) => {
         }
 
         await transaction.commit();
-        res.json({ status: 'ok', message: 'Pago ingresado correctamente' });
+
+        if (eraRechazada && esPagoSalud && pool.pgPool) {
+            await pool.request()
+                .input('NumLicPg', sql.NVarChar, numeroLicencia)
+                .query(`
+                    UPDATE LIC_LICENCIA_ACTUAL
+                    SET
+                        Rechazo = 0,
+                        Autorizada = 'True',
+                        Estado = 'AUT_PAGO_SALUD',
+                        Observacion_Compin = CASE
+                            WHEN ISNULL(Observacion_Compin, '') LIKE '%AUTORIZADA POR PAGO INST. SALUD%'
+                                THEN Observacion_Compin
+                            WHEN LTRIM(RTRIM(ISNULL(Observacion_Compin, ''))) = ''
+                                THEN '[AUTORIZADA POR PAGO INST. SALUD]'
+                            ELSE LEFT(RTRIM(Observacion_Compin) + ' | [AUTORIZADA POR PAGO INST. SALUD]', 1000)
+                        END
+                    WHERE RTRIM(NumeroLicencia) = @NumLicPg
+                `).catch(() => {});
+        }
+
+        res.json({
+            status: 'ok',
+            message: eraRechazada && esPagoSalud
+                ? 'Pago ingresado correctamente. La licencia estaba Rechazada y pasó automáticamente a Autorizada por Pago de Inst. de Salud.'
+                : 'Pago ingresado correctamente',
+            pasoAAutorizada: eraRechazada && esPagoSalud
+        });
     } catch (err) {
-        await transaction.rollback();
+        await transaction.rollback().catch(() => {});
         console.error('Error ingresando pago:', err);
         res.status(500).json({ error: 'Error al registrar el pago en la base de datos' });
     }

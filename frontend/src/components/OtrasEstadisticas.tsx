@@ -98,6 +98,7 @@ export default function OtrasEstadisticas({ modulo, titulo }: OtrasEstadisticasP
               onChange={(e) => setYear(e.target.value)}
               className="w-full border border-gray-300 rounded p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#016098]"
             >
+              <option value="">Histórico (Todos los años)</option>
               <option value="2020">2020</option>
               <option value="2021">2021</option>
               <option value="2022">2022</option>

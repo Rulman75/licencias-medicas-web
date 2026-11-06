@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
+import { exportToCorporatePDF } from '../utils/exportUtils';
 
 interface FuncionarioPagoStat {
   Rut: string;
@@ -178,9 +179,56 @@ export default function InfoGestionPagoLicencias({ tipo, titulo }: Props) {
           <div className="p-4 bg-gray-50 border-b font-bold text-gray-700 flex justify-between items-center">
             <span>Resultados ({data.length})</span>
             {data.length > 0 && (
-              <button onClick={exportToExcel} className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded transition">
-                Exportar Excel
-              </button>
+              <div className="flex gap-2">
+                <button onClick={exportToExcel} className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded transition font-bold">
+                  Exportar Excel
+                </button>
+                <button
+                  onClick={() => {
+                    const totRec = data.reduce((a, x) => a + Number(x.PagoRecuperado || 0), 0);
+                    const totPorRec = data.reduce((a, x) => a + Number(x.PagoPorRecuperar || 0), 0);
+                    exportToCorporatePDF({
+                      title: titulo.toUpperCase(),
+                      subtitle: `Período: ${formatDate(fechaDesde)} al ${formatDate(fechaHasta)}`,
+                      kpis: [
+                        { label: 'Total Licencias', value: data.length, color: 'blue' },
+                        { label: 'Total Recuperado', value: formatCurrency(totRec), color: 'emerald' },
+                        { label: 'Total Por Recuperar', value: formatCurrency(totPorRec), color: 'rose' }
+                      ],
+                      columns: [
+                        { header: 'RUT', key: 'RutFmt' },
+                        { header: 'Funcionario', key: 'FuncFmt' },
+                        { header: 'Unidad', key: 'Unidad' },
+                        { header: 'N° Licencia', key: 'NumeroLicencia' },
+                        { header: 'Desde / Hasta', key: 'PeriodoFmt', align: 'center' },
+                        { header: 'Días', key: 'NumDias', align: 'center' },
+                        { header: 'Estimado / Desc.', key: 'EstDescFmt', align: 'right' },
+                        { header: 'Recuperado', key: 'RecFmt', align: 'right' },
+                        { header: 'Por Recuperar', key: 'PorRecFmt', align: 'right' }
+                      ],
+                      rows: data.map(item => ({
+                        RutFmt: `${item.Rut}-${item.Dv}`,
+                        FuncFmt: `${item.Nombre} ${item.Apellido_Paterno} ${item.Apellido_Materno}`.trim(),
+                        Unidad: item.Unidad,
+                        NumeroLicencia: item.NumeroLicencia,
+                        PeriodoFmt: `${formatDate(item.Desde)} al ${formatDate(item.Hasta)}`,
+                        NumDias: item.NumDias,
+                        EstDescFmt: `${formatCurrency(item.PagoEstimado)} / ${formatCurrency(item.MontoDesc)}`,
+                        RecFmt: formatCurrency(item.PagoRecuperado),
+                        PorRecFmt: formatCurrency(item.PagoPorRecuperar)
+                      })),
+                      totalsRow: {
+                        RutFmt: 'TOTAL',
+                        RecFmt: formatCurrency(totRec),
+                        PorRecFmt: formatCurrency(totPorRec)
+                      }
+                    });
+                  }}
+                  className="text-xs bg-[#016098] hover:bg-[#014d7a] text-white px-3 py-1.5 rounded transition font-bold"
+                >
+                  Exportar PDF
+                </button>
+              </div>
             )}
           </div>
           <div className="overflow-x-auto flex-1 max-h-[600px] overflow-y-auto">
@@ -237,12 +285,41 @@ export default function InfoGestionPagoLicencias({ tipo, titulo }: Props) {
           <div className="p-4 bg-gray-50 border-b font-bold text-gray-700 flex justify-between items-center">
             <span>Pagos Recibidos {selectedLicencia ? `(Lic: ${selectedLicencia})` : ''}</span>
             {detallesPago.length > 0 && (
-              <button 
-                onClick={exportDetalleToExcel}
-                className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded transition"
-              >
-                Excel
-              </button>
+              <div className="flex gap-1.5">
+                <button 
+                  onClick={exportDetalleToExcel}
+                  className="text-xs bg-green-600 hover:bg-green-700 text-white px-2.5 py-1 rounded transition font-bold"
+                >
+                  Excel
+                </button>
+                <button
+                  onClick={() => {
+                    const totM = detallesPago.reduce((a, d) => a + Number(d.Monto || 0), 0);
+                    exportToCorporatePDF({
+                      title: `DETALLE DE PAGOS RECIBIDOS — LICENCIA #${selectedLicencia}`,
+                      columns: [
+                        { header: 'N° Transferencia / Doc.', key: 'NumeroDocumento' },
+                        { header: 'Fecha Pago', key: 'FechaFmt', align: 'center' },
+                        { header: 'Días Pagados', key: 'DiasPagados', align: 'center' },
+                        { header: 'Monto Recuperado', key: 'MontoFmt', align: 'right' },
+                        { header: 'Concepto', key: 'concepto' }
+                      ],
+                      rows: detallesPago.map(det => ({
+                        ...det,
+                        FechaFmt: formatDate(det.FechaDepCtaCte),
+                        MontoFmt: formatCurrency(det.Monto)
+                      })),
+                      totalsRow: {
+                        NumeroDocumento: 'TOTAL',
+                        MontoFmt: formatCurrency(totM)
+                      }
+                    });
+                  }}
+                  className="text-xs bg-[#016098] hover:bg-[#014d7a] text-white px-2.5 py-1 rounded transition font-bold"
+                >
+                  PDF
+                </button>
+              </div>
             )}
           </div>
           <div className="overflow-x-auto flex-1 max-h-[600px] overflow-y-auto">

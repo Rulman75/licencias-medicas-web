@@ -4,6 +4,7 @@ import axios from 'axios';
 import * as XLSX from 'xlsx';
 import * as htmlToImage from 'html-to-image';
 import OtrasEstadisticas from './OtrasEstadisticas';
+import { exportToCorporatePDF } from '../utils/exportUtils';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 interface GroupStat {
@@ -900,7 +901,31 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded text-xs font-bold transition shadow-xs"
                       title="Exportar Desglose Mensual a Excel"
                     >
-                      Exportar Meses a Excel
+                      📊 Exportar Meses a Excel
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!stats.porMes || stats.porMes.length === 0) return;
+                        exportToCorporatePDF({
+                          title: `Desglose Mensual de Recupero — ${titulo}`,
+                          subtitle: `Criterio: ${criterio === 'desde' ? 'Fecha Inicio Reposo (Desde)' : 'Fecha de Recepción'} · ${year ? `Año ${year}` : startYear ? `Desde ${startYear}` : 'Histórico'}`,
+                          orientation: 'landscape',
+                          columns: [
+                            { header: 'Mes', key: 'MesNombre', format: (v, r) => v || r.Label },
+                            { header: 'Total Licencias', key: 'Cantidad', align: 'center', format: v => formatNumber(Number(v || 0)) },
+                            { header: 'Monto Total ($)', key: 'TotalMonto', align: 'right', format: v => String(formatCurrency(Number(v || 0))) },
+                            { header: 'Lic. Pagadas', key: 'PagadasCantidad', align: 'center', format: v => formatNumber(Number(v || 0)) },
+                            { header: 'Monto Pagadas ($)', key: 'PagadasMonto', align: 'right', format: v => String(formatCurrency(Number(v || 0))) },
+                            { header: 'Lic. Impagas', key: 'ImpagasCantidad', align: 'center', format: v => formatNumber(Number(v || 0)) },
+                            { header: 'Monto Impagas ($)', key: 'ImpagasMonto', align: 'right', format: v => String(formatCurrency(Number(v || 0))) }
+                          ],
+                          rows: stats.porMes
+                        });
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-[#016098] hover:bg-[#014b78] text-white rounded text-xs font-bold transition shadow-xs"
+                      title="Exportar Desglose Mensual a PDF"
+                    >
+                      📄 Exportar Meses a PDF
                     </button>
                   </div>
                 </div>
@@ -1052,9 +1077,38 @@ export default function EstadisticasDashboard({ modulo, titulo }: EstadisticasDa
                 <button
                   onClick={handleExportExcel}
                   disabled={detalle.length === 0}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white px-4 py-2 rounded text-sm font-semibold transition shadow-sm"
+                >
+                  📊 Descargar Excel
+                </button>
+                <button
+                  onClick={() => {
+                    if (filteredDetalle.length === 0) return;
+                    exportToCorporatePDF({
+                      title: `Detalle: ${getDetailTitle()}`,
+                      subtitle: `Módulo: ${titulo} · Registros: ${filteredDetalle.length}`,
+                      orientation: 'landscape',
+                      columns: tableColumns.map(col => ({
+                        header: col,
+                        key: col,
+                        align: col === 'PagoEstimado' || col === 'MONTOPAG' ? ('right' as const) : ('left' as const),
+                        format: (val: any) => {
+                          if (col === 'PagoEstimado' || col === 'MONTOPAG') return String(formatCurrency(val));
+                          if (val === null || val === undefined) return '-';
+                          if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}T/)) {
+                            const [y, m, d] = val.split('T')[0].split('-');
+                            return `${d}-${m}-${y}`;
+                          }
+                          return String(val);
+                        }
+                      })),
+                      rows: filteredDetalle
+                    });
+                  }}
+                  disabled={filteredDetalle.length === 0}
                   className="bg-[#016098] hover:bg-[#024a8d] disabled:bg-gray-400 text-white px-4 py-2 rounded text-sm font-semibold transition shadow-sm"
                 >
-                  Descargar Excel
+                  📄 Descargar PDF
                 </button>
                 <button
                   onClick={() => {

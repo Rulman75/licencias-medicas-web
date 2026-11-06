@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { exportToExcel, exportToCorporatePDF } from '../utils/exportUtils';
 
 interface BitacoraItem {
   Id: number;
@@ -41,7 +42,7 @@ export default function Bitacora() {
     if (!window.confirm('¿Estás seguro que deseas deshacer esta carga? Esto eliminará todos los registros nuevos y revertirá las fechas de los registros actualizados.')) {
       return;
     }
-    
+
     try {
       setRollingBackId(id);
       const token = localStorage.getItem('token');
@@ -59,20 +60,67 @@ export default function Bitacora() {
 
   return (
     <div className="p-8 w-full mx-auto">
-      <div className="flex justify-between items-center mb-6 border-b border-[#e2e8f0] pb-4">
+      <div className="flex flex-wrap justify-between items-center mb-6 border-b border-[#e2e8f0] pb-4 gap-3">
         <div>
           <h2 className="text-2xl font-bold text-[#016098]">Auditoría de Cargas</h2>
           <p className="text-gray-500 mt-1 text-sm">Historial de archivos procesados en el módulo de Órdenes de Reposo.</p>
         </div>
-        <button 
-          onClick={fetchBitacora}
-          className="bg-[#016098] hover:bg-[#014d7a] text-white px-5 py-2.5 rounded-lg font-semibold transition shadow-sm flex items-center gap-2"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-          </svg>
-          Actualizar
-        </button>
+        <div className="flex items-center gap-2">
+          {data.length > 0 && (
+            <>
+              <button
+                onClick={() => {
+                  const rows = data.map(row => ({
+                    'ID': row.Id,
+                    'Fecha de Proceso': row.FechaProceso,
+                    'Nombre del Archivo': row.NombreArchivo,
+                    'Registros Leídos': row.TotalRegistros,
+                    'Nuevos': row.RegistrosNuevos,
+                    'Nuevos (Existentes)': row.RegistrosNuevosReposos,
+                    'Actualizados': row.RegistrosActualizados,
+                    'Usuario': row.Usuario
+                  }));
+                  exportToExcel(rows, 'Auditoria_Cargas_Reposo.xlsx', 'Bitacora');
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg text-xs font-bold transition shadow-sm"
+              >
+                📊 Exportar Excel
+              </button>
+              <button
+                onClick={() =>
+                  exportToCorporatePDF({
+                    title: 'Auditoría de Cargas — Módulo Órdenes de Reposo',
+                    subtitle: `Total de procesos registrados: ${data.length}`,
+                    orientation: 'landscape',
+                    columns: [
+                      { header: 'ID', key: 'Id', align: 'center' },
+                      { header: 'Fecha Proceso', key: 'FechaProceso' },
+                      { header: 'Nombre del Archivo', key: 'NombreArchivo' },
+                      { header: 'Registros Leídos', key: 'TotalRegistros', align: 'center' },
+                      { header: 'Nuevos', key: 'RegistrosNuevos', align: 'center' },
+                      { header: 'Nuevos (Exist.)', key: 'RegistrosNuevosReposos', align: 'center' },
+                      { header: 'Actualizados', key: 'RegistrosActualizados', align: 'center' },
+                      { header: 'Usuario', key: 'Usuario', align: 'center' }
+                    ],
+                    rows: data
+                  })
+                }
+                className="bg-[#016098] hover:bg-[#014b78] text-white px-4 py-2.5 rounded-lg text-xs font-bold transition shadow-sm"
+              >
+                📄 Exportar PDF
+              </button>
+            </>
+          )}
+          <button
+            onClick={fetchBitacora}
+            className="bg-[#016098] hover:bg-[#014d7a] text-white px-5 py-2.5 rounded-lg font-semibold transition shadow-sm flex items-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            Actualizar
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
@@ -111,7 +159,7 @@ export default function Bitacora() {
                   const isReverted = row.NombreArchivo.includes('(REVERTIDO)');
                   const cleanName = row.NombreArchivo.replace('(REVERTIDO)', '').trim();
                   const files = cleanName.split('|').map(s => s.trim());
-                  
+
                   return (
                     <tr key={row.Id} className={`transition ${isReverted ? 'bg-red-50' : 'hover:bg-blue-50'}`}>
                       <td className="p-4 text-gray-500 font-semibold">#{row.Id}</td>
@@ -149,9 +197,9 @@ export default function Bitacora() {
                             onClick={() => handleRollback(row.Id)}
                             disabled={rollingBackId === row.Id}
                             className={`text-xs px-3 py-1 rounded border font-bold ${
-                              rollingBackId === row.Id 
-                              ? 'bg-gray-100 text-gray-400 border-gray-300' 
-                              : 'bg-red-100 hover:bg-red-200 text-red-700 border-red-300'
+                              rollingBackId === row.Id
+                                ? 'bg-gray-100 text-gray-400 border-gray-300'
+                                : 'bg-red-100 hover:bg-red-200 text-red-700 border-red-300'
                             }`}
                           >
                             {rollingBackId === row.Id ? 'Revirtiendo...' : 'Deshacer'}

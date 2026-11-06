@@ -169,7 +169,7 @@ export default function Layout() {
                           : 'text-blue-100 hover:bg-white/10'
                       }`}
                     >
-                      Ingreso Pagos y Cheques
+                      Ingreso Pagos y Transferencias
                     </Link>
                   </div>
                 )}

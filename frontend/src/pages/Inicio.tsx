@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import ControlConvenioMensual from '../components/ControlConvenioMensual';
+import { exportToExcel, exportToCorporatePDF } from '../utils/exportUtils';
 import {
   PieChart,
   Pie,
@@ -191,7 +192,7 @@ export default function Inicio() {
                 to="/mantencion/pagos"
                 className="px-3.5 py-2 bg-[#39BABD] hover:bg-[#2da3a6] text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
               >
-                + Ingresar Pago / Cheque
+                + Ingresar Pago / Transferencia
               </Link>
             </>
           )}
@@ -436,15 +437,15 @@ export default function Inicio() {
                 </p>
               </div>
 
-              {/* Estado de Cheques */}
+              {/* Estado de Transferencias / Documentos de Pago */}
               <div className="bg-white rounded-xl shadow-sm p-5 border border-[#e2e8f0] flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-[#64748b] uppercase">
-                      Control de Cheques
+                      Control de Transferencias
                     </span>
                     <span className="text-xs font-bold bg-sky-100 text-[#016098] px-2 py-0.5 rounded-full">
-                      {stats.cheques.TotalCheques.toLocaleString('es-CL')} registrados
+                      {stats.cheques.TotalCheques.toLocaleString('es-CL')} registradas
                     </span>
                   </div>
                   <div className="flex items-baseline gap-4 mt-2">
@@ -452,24 +453,24 @@ export default function Inicio() {
                       <span className="text-xl font-black text-amber-600">
                         {stats.cheques.ChequesAbiertos.toLocaleString('es-CL')}
                       </span>
-                      <span className="text-xs text-[#64748b] ml-1">Abiertos</span>
+                      <span className="text-xs text-[#64748b] ml-1">Abiertas</span>
                     </div>
                     <div>
                       <span className="text-xl font-black text-emerald-600">
                         {stats.cheques.ChequesCerrados.toLocaleString('es-CL')}
                       </span>
-                      <span className="text-xs text-[#64748b] ml-1">Cerrados</span>
+                      <span className="text-xs text-[#64748b] ml-1">Cerradas</span>
                     </div>
                   </div>
                 </div>
                 <p className="text-[11px] text-[#64748b] mt-3">
-                  Documentos controlados en módulo de Ingreso de Pagos
+                  Transferencias y documentos controlados en Ingreso de Pagos
                 </p>
               </div>
             </div>
 
             {/* BLOQUE 2.5: Control Mensual de Licencias con Convenio Tramitadas y Recuperación de Subsidios */}
-            <ControlConvenioMensual initialYear={year || String(new Date().getFullYear())} />
+            <ControlConvenioMensual initialYear={year || 'historico'} />
 
             {/* BLOQUE 3: Gráficos de Evolución y Distribución */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -577,13 +578,50 @@ export default function Inicio() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Top Instituciones de Salud / Isapres */}
               <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] overflow-hidden">
-                <div className="p-5 border-b border-[#e2e8f0]">
-                  <h3 className="text-sm font-bold text-[#016098] uppercase">
-                    Principales Instituciones de Salud (Fonasa / Isapres)
-                  </h3>
-                  <p className="text-xs text-[#64748b]">
-                    Volumen de licencias, días otorgados y montos estimados vs. recuperados
-                  </p>
+                <div className="p-5 border-b border-[#e2e8f0] flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-[#016098] uppercase">
+                      Principales Instituciones de Salud (Fonasa / Isapres)
+                    </h3>
+                    <p className="text-xs text-[#64748b]">
+                      Volumen de licencias, días otorgados y montos estimados vs. recuperados
+                    </p>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => {
+                        const rows = stats.topSalud.map(s => ({
+                          'Institución de Salud': s.Institucion,
+                          'Licencias': Number(s.Cantidad),
+                          'Días': Number(s.Dias),
+                          'Subsidio Estimado ($)': Number(s.Estimado),
+                          'Recuperado ($)': Number(s.Pagado)
+                        }));
+                        exportToExcel(rows, `Top_Instituciones_Salud_${year || 'Historico'}.xlsx`, 'Top_Salud');
+                      }}
+                      className="px-2.5 py-1 bg-emerald-600 text-white text-[11px] font-bold rounded hover:bg-emerald-700"
+                    >
+                      📊 Excel
+                    </button>
+                    <button
+                      onClick={() =>
+                        exportToCorporatePDF({
+                          title: `Ranking Instituciones de Salud — ${year ? `Año ${year}` : 'Histórico'}`,
+                          columns: [
+                            { header: 'Institución de Salud', key: 'Institucion' },
+                            { header: 'Licencias', key: 'Cantidad', align: 'right', format: v => Number(v || 0).toLocaleString('es-CL') },
+                            { header: 'Días', key: 'Dias', align: 'right', format: v => Number(v || 0).toLocaleString('es-CL') },
+                            { header: 'Subsidio Estimado ($)', key: 'Estimado', align: 'right', format: v => formatCLP(v) },
+                            { header: 'Recuperado ($)', key: 'Pagado', align: 'right', format: v => formatCLP(v) }
+                          ],
+                          rows: stats.topSalud
+                        })
+                      }
+                      className="px-2.5 py-1 bg-[#016098] text-white text-[11px] font-bold rounded hover:bg-[#014b78]"
+                    >
+                      📄 PDF
+                    </button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs text-left border-collapse">
@@ -621,13 +659,50 @@ export default function Inicio() {
 
               {/* Top 10 Establecimientos / Unidades */}
               <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] overflow-hidden">
-                <div className="p-5 border-b border-[#e2e8f0]">
-                  <h3 className="text-sm font-bold text-[#016098] uppercase">
-                    Top 10 Establecimientos / Unidades con Mayor Ausentismo
-                  </h3>
-                  <p className="text-xs text-[#64748b]">
-                    Unidades con mayor cantidad de licencias y días otorgados en el periodo
-                  </p>
+                <div className="p-5 border-b border-[#e2e8f0] flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-[#016098] uppercase">
+                      Top 10 Establecimientos / Unidades con Mayor Ausentismo
+                    </h3>
+                    <p className="text-xs text-[#64748b]">
+                      Unidades con mayor cantidad de licencias y días otorgados en el periodo
+                    </p>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => {
+                        const rows = stats.topEstablecimientos.map(u => ({
+                          'Cenco': u.CodUnidad,
+                          'Establecimiento / Unidad': u.Establecimiento,
+                          'Funcionarios': Number(u.Funcionarios),
+                          'Licencias': Number(u.Cantidad),
+                          'Total Días': Number(u.Dias)
+                        }));
+                        exportToExcel(rows, `Top_Establecimientos_${year || 'Historico'}.xlsx`, 'Top_Unidades');
+                      }}
+                      className="px-2.5 py-1 bg-emerald-600 text-white text-[11px] font-bold rounded hover:bg-emerald-700"
+                    >
+                      📊 Excel
+                    </button>
+                    <button
+                      onClick={() =>
+                        exportToCorporatePDF({
+                          title: `Top 10 Establecimientos / Unidades con Mayor Ausentismo — ${year ? `Año ${year}` : 'Histórico'}`,
+                          columns: [
+                            { header: 'Cenco', key: 'CodUnidad', align: 'center' },
+                            { header: 'Establecimiento / Unidad', key: 'Establecimiento' },
+                            { header: 'Funcionarios', key: 'Funcionarios', align: 'right', format: v => Number(v || 0).toLocaleString('es-CL') },
+                            { header: 'Licencias', key: 'Cantidad', align: 'right', format: v => Number(v || 0).toLocaleString('es-CL') },
+                            { header: 'Total Días', key: 'Dias', align: 'right', format: v => Number(v || 0).toLocaleString('es-CL') }
+                          ],
+                          rows: stats.topEstablecimientos
+                        })
+                      }
+                      className="px-2.5 py-1 bg-[#016098] text-white text-[11px] font-bold rounded hover:bg-[#014b78]"
+                    >
+                      📄 PDF
+                    </button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs text-left border-collapse">
@@ -675,14 +750,61 @@ export default function Inicio() {
                     Actividad reciente registrada en la base de datos de licencias médicas
                   </p>
                 </div>
-                {esAdmin && (
-                  <Link
-                    to="/informes/diarias"
-                    className="text-xs font-bold text-[#016098] hover:underline"
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const rows = stats.recientes.map(item => ({
+                        'N° Licencia': item.NumeroLicencia,
+                        'Recepción': formatDateDDMMYYYY(item.Recepcion),
+                        'RUT': `${item.Rut}${item.DV ? `-${item.DV}` : ''}`,
+                        'Funcionario': item.Funcionario,
+                        'Establecimiento': `${item.CodUnidad ? `#${item.CodUnidad} ` : ''}${item.Establecimiento}`,
+                        'Inst. de Salud': item.Salud,
+                        'Desde': formatDateDDMMYYYY(item.Desde),
+                        'Hasta': formatDateDDMMYYYY(item.Hasta),
+                        'Días': item.NumDias,
+                        'Estado': item.Rechazo === 1 ? 'RECHAZADA' : item.Reducida === 1 ? 'REDUCIDA' : item.TotalPagado > 0 ? 'PAGADA' : 'VIGENTE',
+                        'Subsidio Est. ($)': item.PagoEstimado
+                      }));
+                      exportToExcel(rows, `Ultimas_Licencias_Recepcionadas.xlsx`, 'Recientes');
+                    }}
+                    className="px-2.5 py-1 bg-emerald-600 text-white text-[11px] font-bold rounded hover:bg-emerald-700"
                   >
-                    Ver informe de recepción diaria &rarr;
-                  </Link>
-                )}
+                    📊 Excel
+                  </button>
+                  <button
+                    onClick={() =>
+                      exportToCorporatePDF({
+                        title: 'Últimas Licencias Recepcionadas en el Sistema',
+                        orientation: 'landscape',
+                        columns: [
+                          { header: 'N° Licencia', key: 'NumeroLicencia' },
+                          { header: 'Recepción', key: 'Recepcion', align: 'center', format: v => formatDateDDMMYYYY(v) },
+                          { header: 'RUT', key: 'Rut', format: (_, r) => `${r.Rut}${r.DV ? `-${r.DV}` : ''}` },
+                          { header: 'Funcionario', key: 'Funcionario' },
+                          { header: 'Establecimiento', key: 'Establecimiento', format: (_, r) => `${r.CodUnidad ? `#${r.CodUnidad} ` : ''}${r.Establecimiento}` },
+                          { header: 'Inst. Salud', key: 'Salud' },
+                          { header: 'Desde / Hasta', key: 'Desde', align: 'center', format: (_, r) => `${formatDateDDMMYYYY(r.Desde)} al ${formatDateDDMMYYYY(r.Hasta)}` },
+                          { header: 'Días', key: 'NumDias', align: 'center' },
+                          { header: 'Estado', key: 'Rechazo', align: 'center', format: (_, r) => r.Rechazo === 1 ? 'RECHAZADA' : r.Reducida === 1 ? 'REDUCIDA' : r.TotalPagado > 0 ? 'PAGADA' : 'VIGENTE' },
+                          { header: 'Subsidio Est. ($)', key: 'PagoEstimado', align: 'right', format: v => formatCLP(v) }
+                        ],
+                        rows: stats.recientes
+                      })
+                    }
+                    className="px-2.5 py-1 bg-[#016098] text-white text-[11px] font-bold rounded hover:bg-[#014b78]"
+                  >
+                    📄 PDF
+                  </button>
+                  {esAdmin && (
+                    <Link
+                      to="/informes/diarias"
+                      className="text-xs font-bold text-[#016098] hover:underline ml-2"
+                    >
+                      Ver informe de recepción diaria &rarr;
+                    </Link>
+                  )}
+                </div>
               </div>
 
               <div className="overflow-x-auto">

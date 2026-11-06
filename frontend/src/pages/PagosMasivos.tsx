@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
+import { exportToExcel, exportToCorporatePDF, formatCurrencyCLP } from '../utils/exportUtils';
 
 interface PagosMasivosProps {
-  tabInicial?: 'importar' | 'auditar' | 'eliminar';
+  tabInicial?: 'importar' | 'auditar' | 'eliminar' | 'aut_pago';
 }
 
 export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosProps) {
-  const [tabActiva, setTabActiva] = useState<'importar' | 'auditar' | 'eliminar'>(tabInicial);
+  const [tabActiva, setTabActiva] = useState<'importar' | 'auditar' | 'eliminar' | 'aut_pago'>(tabInicial);
 
   useEffect(() => {
     setTabActiva(tabInicial);
@@ -27,14 +28,21 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
     totalLeidos: number;
     totalValidos: number;
     totalNoEncontrados: number;
+    totalPasanAAutorizada?: number;
     montoTotalValidos: number;
   } | null>(null);
-  const [filtroPreview, setFiltroPreview] = useState<'todos' | 'validos' | 'no_encontrados'>('todos');
+  const [filtroPreview, setFiltroPreview] = useState<'todos' | 'validos' | 'no_encontrados' | 'pasan_aut'>('todos');
   const [resultadoProceso, setResultadoProceso] = useState<{
     leidos: number;
     insertados: number;
     licenciasNoEncontradas: string[];
+    licenciasAutorizadasPorPago: any[];
   } | null>(null);
+
+  // --- ESTADO TAB 4: REPORTE AUTORIZADAS POR PAGO INST. SALUD ---
+  const [anioAutPago, setAnioAutPago] = useState<string>('');
+  const [registrosAutPago, setRegistrosAutPago] = useState<any[]>([]);
+  const [cargandoAutPago, setCargandoAutPago] = useState(false);
 
   // --- ESTADO TAB 2: AUDITAR PAGOS ---
   const [auditNumDoc, setAuditNumDoc] = useState('');
@@ -257,7 +265,8 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
         setResultadoProceso({
           leidos: data.leidos,
           insertados: data.insertados,
-          licenciasNoEncontradas: data.licenciasNoEncontradas || []
+          licenciasNoEncontradas: data.licenciasNoEncontradas || [],
+          licenciasAutorizadasPorPago: data.licenciasAutorizadasPorPago || []
         });
         mostrarAlerta('ok', data.message);
         await cargarFiltros();
@@ -482,9 +491,56 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
     XLSX.writeFile(wb, `Respaldo_Antes_Eliminar_${elimObservacion || elimNumDoc}.xlsx`);
   };
 
+  const cargarReporteAutorizadasPorPago = async (yearParam = anioAutPago) => {
+    setCargandoAutPago(true);
+    try {
+      const q = yearParam ? `?year=${encodeURIComponent(yearParam)}` : '';
+      const res = await fetch(`/api/pagos-masivos/autorizadas-por-pago${q}`);
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        setRegistrosAutPago(data.registros || []);
+      } else {
+        mostrarAlerta('error', data.error || 'Error obteniendo reporte de licencias autorizadas por pago');
+      }
+    } catch {
+      mostrarAlerta('error', 'Error de red cargando reporte');
+    } finally {
+      setCargandoAutPago(false);
+    }
+  };
+
+  const exportarAutorizadasPorPagoExcel = (lista: any[], sufijo = 'Historico') => {
+    if (!lista || lista.length === 0) return;
+    const rows = lista.map((r: any) => ({
+      'N° Licencia': r.NumeroLicencia,
+      'RUT': r.Rut || r.RutFuncionario || '',
+      'DV': r.DV || '',
+      'Funcionario': r.Funcionario || r.NombreFuncionario || '',
+      'Sector': r.Sector || '',
+      'Establecimiento': r.Establecimiento || '',
+      'Inst. de Salud': r.Salud || '',
+      'Desde': formatDateDDMMYYYY(r.Desde),
+      'Hasta': formatDateDDMMYYYY(r.Hasta),
+      'Días': Number(r.NumDias || 0),
+      'Pago Estimado ($)': Number(r.PagoEstimado || 0),
+      'Monto Descuento ($)': Number(r.MontoDesc || 0),
+      'Pagado Subsidio ($)': Number(r.MontoSubsidio ?? r.MontoPago ?? 0),
+      'Pagado Aporte ($)': Number(r.MontoAporte ?? 0),
+      'Total Pagado Salud ($)': Number(r.MontoSaludTotal ?? r.MontoPago ?? 0),
+      'Último Pago Salud': formatDateDDMMYYYY(r.UltimoPagoSalud || r.FechaDepCtaCte || ''),
+      'Estado': r.Estado || 'AUT_PAGO_SALUD',
+      'Observación COMPIN': r.Observacion_Compin || ''
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Autorizadas_Por_Pago_Salud');
+    XLSX.writeFile(wb, `Reporte_Licencias_Autorizadas_Por_Pago_Salud_${sufijo}.xlsx`);
+  };
+
   const registrosPreviewFiltrados = registrosPreview.filter(r => {
     if (filtroPreview === 'validos') return r.existeLicencia;
     if (filtroPreview === 'no_encontrados') return !r.existeLicencia;
+    if (filtroPreview === 'pasan_aut') return Boolean(r.pasaAAutorizada);
     return true;
   });
 
@@ -530,6 +586,19 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
             }`}
           >
             Eliminar Pago Masivo
+          </button>
+          <button
+            onClick={() => {
+              setTabActiva('aut_pago');
+              if (registrosAutPago.length === 0) cargarReporteAutorizadasPorPago(anioAutPago);
+            }}
+            className={`px-4 py-2 text-xs font-bold rounded-lg transition-colors ${
+              tabActiva === 'aut_pago'
+                ? 'bg-emerald-700 text-white shadow-sm'
+                : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100'
+            }`}
+          >
+            Autorizadas por Pago Inst. Salud
           </button>
         </div>
       </div>
@@ -598,7 +667,7 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
 
             {/* Tarjetas de Resumen de Previsualización */}
             {resumenPreview && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 pt-2">
                 <div
                   onClick={() => setFiltroPreview('todos')}
                   className={`p-4 rounded-xl border cursor-pointer transition-all ${
@@ -619,6 +688,18 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
                 >
                   <span className="text-xs text-emerald-800 block">Licencias Válidas (Se Insertarán)</span>
                   <span className="text-xl font-bold text-emerald-700">{resumenPreview.totalValidos}</span>
+                </div>
+
+                <div
+                  onClick={() => setFiltroPreview('pasan_aut')}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    filtroPreview === 'pasan_aut'
+                      ? 'bg-amber-100 border-amber-400'
+                      : 'bg-amber-50 border-amber-200'
+                  }`}
+                >
+                  <span className="text-xs text-amber-900 block">Rechazadas → Pasan a Autorizadas</span>
+                  <span className="text-xl font-bold text-amber-800">{resumenPreview.totalPasanAAutorizada || 0}</span>
                 </div>
 
                 <div
@@ -659,7 +740,7 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
 
             {/* Resultado post-ejecución */}
             {resultadoProceso && (
-              <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-4 text-xs text-emerald-900 space-y-1">
+              <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-4 text-xs text-emerald-900 space-y-2">
                 <div className="font-bold text-sm">
                   Proceso Terminado — Leídos: {resultadoProceso.leidos} | Insertados: {resultadoProceso.insertados}
                 </div>
@@ -670,16 +751,105 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
                     {resultadoProceso.licenciasNoEncontradas.join(', ')}
                   </div>
                 )}
+                {resultadoProceso.licenciasAutorizadasPorPago?.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-amber-950 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div>
+                      <span className="font-bold block text-amber-900">
+                        ⚡ {resultadoProceso.licenciasAutorizadasPorPago.length} licencia(s) figuraban como Rechazadas y pasaron automáticamente a AUTORIZADAS (`AUT_PAGO_SALUD`) por recibo de pago de Inst. de Salud:
+                      </span>
+                      <span className="text-[11px] text-amber-800">
+                        {resultadoProceso.licenciasAutorizadasPorPago.map((l: any) => l.NumeroLicencia).join(', ')}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => exportarAutorizadasPorPagoExcel(resultadoProceso.licenciasAutorizadasPorPago, 'Lote_Actual')}
+                      className="px-3 py-1.5 bg-amber-700 text-white text-xs font-bold rounded-lg hover:bg-amber-800 whitespace-nowrap"
+                    >
+                      📥 Exportar Reporte Excel
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
             {/* Tabla de Previsualización o Último Lote en Importar_Pago */}
             <div>
-              <h3 className="text-xs font-bold text-[#475569] uppercase mb-2">
-                {registrosPreview.length > 0
-                  ? `Previsualización del Archivo "${nombreArchivo}" (${registrosPreviewFiltrados.length} filas)`
-                  : `Último Lote Cargado en Tabla Importar_Pago (${ultimaImportacion.length} registros)`}
-              </h3>
+              <div className="flex flex-wrap justify-between items-center gap-2 mb-2">
+                <h3 className="text-xs font-bold text-[#475569] uppercase">
+                  {registrosPreview.length > 0
+                    ? `Previsualización del Archivo "${nombreArchivo}" (${registrosPreviewFiltrados.length} filas)`
+                    : `Último Lote Cargado en Tabla Importar_Pago (${ultimaImportacion.length} registros)`}
+                </h3>
+                {(registrosPreview.length > 0 ? registrosPreviewFiltrados : ultimaImportacion).length > 0 && (
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const rowsSrc = registrosPreview.length > 0 ? registrosPreviewFiltrados : ultimaImportacion;
+                        exportToExcel(
+                          rowsSrc.map(r => ({
+                            'N° Licencia': r.col1,
+                            'N° Transferencia / Doc.': r.col3,
+                            'Fecha DepCta': r.col4,
+                            'Días Pagados': r.col5,
+                            'Desde': r.col6,
+                            'Hasta': r.col7,
+                            'Monto Pagado ($)': r.col8,
+                            'Observación': r.col9,
+                            'Fecha Recepción': r.col10,
+                            'Concepto': r.col11,
+                            'Banco': r.col12,
+                            'Cenco': r.col13
+                          })),
+                          registrosPreview.length > 0 ? `Previsualizacion_${nombreArchivo}` : 'Ultimo_Lote_Importado'
+                        );
+                      }}
+                      className="px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                    >
+                      Exportar Excel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const rowsSrc = registrosPreview.length > 0 ? registrosPreviewFiltrados : ultimaImportacion;
+                        const totM = rowsSrc.reduce(
+                          (acc, r) => acc + Number(String(r.col8 || '0').replace(/\./g, '') || 0),
+                          0
+                        );
+                        exportToCorporatePDF({
+                          title:
+                            registrosPreview.length > 0
+                              ? `PREVISUALIZACIÓN DE CARGA MASIVA DE PAGOS — ${nombreArchivo}`
+                              : 'ÚLTIMO LOTE CARGADO EN TABLA IMPORTAR_PAGO',
+                          columns: [
+                            { header: 'N° Licencia', key: 'col1' },
+                            { header: 'N° Transf.', key: 'col3' },
+                            { header: 'Fecha Dep.', key: 'col4', align: 'center' },
+                            { header: 'Días Pag.', key: 'col5', align: 'center' },
+                            { header: 'Desde', key: 'col6', align: 'center' },
+                            { header: 'Hasta', key: 'col7', align: 'center' },
+                            { header: 'Monto Pag.', key: 'MontoFmt', align: 'right' },
+                            { header: 'Observación', key: 'col9' },
+                            { header: 'Concepto', key: 'col11' },
+                            { header: 'Banco', key: 'col12' }
+                          ],
+                          rows: rowsSrc.map(r => ({
+                            ...r,
+                            MontoFmt: formatCurrencyCLP(String(r.col8 || '0').replace(/\./g, ''))
+                          })),
+                          totalsRow: {
+                            col1: 'TOTAL',
+                            MontoFmt: formatCurrencyCLP(totM)
+                          }
+                        });
+                      }}
+                      className="px-3 py-1 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                    >
+                      Exportar PDF
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[420px]">
                 <table className="w-full text-left text-xs">
@@ -708,15 +878,27 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
                         className={
                           registrosPreview.length > 0 && !r.existeLicencia
                             ? 'bg-rose-50/70 hover:bg-rose-100/70'
+                            : r.pasaAAutorizada
+                            ? 'bg-amber-50/70 hover:bg-amber-100/70'
                             : 'hover:bg-[#f8fafc]'
                         }
                       >
                         {registrosPreview.length > 0 && (
                           <td className="p-2.5">
                             {r.existeLicencia ? (
-                              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold text-[10px]">
-                                OK
-                              </span>
+                              <div className="flex flex-wrap gap-1 items-center">
+                                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold text-[10px]">
+                                  OK
+                                </span>
+                                {r.pasaAAutorizada && (
+                                  <span
+                                    className="px-2 py-0.5 bg-amber-200 text-amber-900 rounded font-bold text-[10px]"
+                                    title="Figuraba como Rechazada y pasará automáticamente a Autorizada al insertar este pago de Subsidio/Aporte"
+                                  >
+                                    RECHAZADA → PASARÁ A AUT.
+                                  </span>
+                                )}
+                              </div>
                             ) : (
                               <span className="px-2 py-0.5 bg-rose-100 text-rose-800 rounded font-bold text-[10px]">
                                 NO EXISTE LIC.
@@ -839,12 +1021,64 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
                   Descuentos
                 </button>
                 {registrosAuditoria.length > 0 && (
-                  <button
-                    onClick={exportarAuditoriaExcel}
-                    className="px-3.5 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
-                  >
-                    Excel
-                  </button>
+                  <>
+                    <button
+                      onClick={exportarAuditoriaExcel}
+                      className="px-3.5 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                    >
+                      Excel
+                    </button>
+                    <button
+                      onClick={() => {
+                        const totM = registrosAuditoria.reduce((a, r) => a + Number(r.Monto || 0), 0);
+                        const totEst = registrosAuditoria.reduce((a, r) => a + Number(r.PagoEstimado || 0), 0);
+                        exportToCorporatePDF({
+                          title: 'REPORTE DE AUDITORÍA DE PAGOS MASIVOS',
+                          subtitle: `Filtro: ${auditNumDoc ? `Transf. #${auditNumDoc}` : ''} ${auditObservacion || ''} — Sector: ${auditArea}`,
+                          kpis: resumenAuditoria
+                            ? [
+                                { label: 'Registros Auditados', value: resumenAuditoria.totalRegistros, color: 'blue' },
+                                { label: 'Total Monto Pagado', value: formatCurrencyCLP(resumenAuditoria.totalMonto), color: 'emerald' },
+                                { label: 'Total Días Pagados', value: resumenAuditoria.totalDiasPagados, color: 'slate' },
+                                { label: 'Pago Estimado Acum.', value: formatCurrencyCLP(resumenAuditoria.totalPagoEstimado), color: 'indigo' }
+                              ]
+                            : undefined,
+                          columns: [
+                            { header: 'RUT', key: 'RutFmt' },
+                            { header: 'Funcionario', key: 'NombreFmt' },
+                            { header: 'Sector / Cenco', key: 'SectorFmt' },
+                            { header: 'N° Licencia', key: 'NumeroLicencia' },
+                            { header: 'Desde / Hasta', key: 'PeriodoFmt', align: 'center' },
+                            { header: 'Días Lic/Pag', key: 'DiasFmt', align: 'center' },
+                            { header: 'Concepto', key: 'Concepto' },
+                            { header: 'Monto Pag.', key: 'MontoFmt', align: 'right' },
+                            { header: 'Pago Estimado', key: 'EstimadoFmt', align: 'right' },
+                            { header: 'Transf. / Banco', key: 'DocFmt' }
+                          ],
+                          rows: registrosAuditoria.map(r => ({
+                            RutFmt: r.Rut ? `${r.Rut}-${r.DV}` : '-',
+                            NombreFmt: `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim() || '-',
+                            SectorFmt: `${r.Sector} (${r.CodUnidad})`,
+                            NumeroLicencia: r.NumeroLicencia,
+                            PeriodoFmt: `${formatDateDDMMYYYY(r.Desde)} al ${formatDateDDMMYYYY(r.Hasta)}`,
+                            DiasFmt: `${r.NumDias} / ${r.DiasPagados}`,
+                            Concepto: r.Concepto,
+                            MontoFmt: formatCurrencyCLP(r.Monto),
+                            EstimadoFmt: formatCurrencyCLP(r.PagoEstimado),
+                            DocFmt: `#${r.NumeroDocumento} (${r.Banco})`
+                          })),
+                          totalsRow: {
+                            RutFmt: 'TOTAL',
+                            MontoFmt: formatCurrencyCLP(totM),
+                            EstimadoFmt: formatCurrencyCLP(totEst)
+                          }
+                        });
+                      }}
+                      className="px-3.5 py-2 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                    >
+                      PDF
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -1060,12 +1294,48 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
               </div>
               <div className="flex gap-2">
                 {registrosEliminar.length > 0 && (
-                  <button
-                    onClick={exportarEliminacionExcel}
-                    className="px-3.5 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700"
-                  >
-                    Descargar Respaldo Excel
-                  </button>
+                  <>
+                    <button
+                      onClick={exportarEliminacionExcel}
+                      className="px-3.5 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700"
+                    >
+                      Descargar Respaldo Excel
+                    </button>
+                    <button
+                      onClick={() => {
+                        exportToCorporatePDF({
+                          title: 'RESPALDO DE PAGOS PREVIO A ELIMINACIÓN MASIVA',
+                          subtitle: `Criterio: ${modoElimActivo === 'observacion' ? elimObservacion : `${elimNumDoc} (${elimBanco})`}`,
+                          columns: [
+                            { header: 'N° Licencia', key: 'NumeroLicencia' },
+                            { header: 'Funcionario', key: 'FuncFmt' },
+                            { header: 'Desde', key: 'DesdeFmt', align: 'center' },
+                            { header: 'Hasta', key: 'HastaFmt', align: 'center' },
+                            { header: 'N° Transf.', key: 'NumeroDocumento' },
+                            { header: 'Banco', key: 'Banco' },
+                            { header: 'Días Pag.', key: 'DiasPagados', align: 'center' },
+                            { header: 'Observación', key: 'Observacion' },
+                            { header: 'Monto ($)', key: 'MontoFmt', align: 'right' },
+                            { header: 'Concepto', key: 'Concepto' }
+                          ],
+                          rows: registrosEliminar.map(r => ({
+                            ...r,
+                            FuncFmt: r.NombreFuncionario || r.RutFuncionario,
+                            DesdeFmt: formatDateDDMMYYYY(r.Desde),
+                            HastaFmt: formatDateDDMMYYYY(r.Hasta),
+                            MontoFmt: formatCurrencyCLP(r.Monto)
+                          })),
+                          totalsRow: {
+                            NumeroLicencia: 'TOTAL',
+                            MontoFmt: formatCurrencyCLP(montoTotalEliminar)
+                          }
+                        });
+                      }}
+                      className="px-3.5 py-1.5 bg-[#016098] text-white text-xs font-semibold rounded-lg hover:bg-[#014b78]"
+                    >
+                      Exportar PDF
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={() => {
@@ -1119,6 +1389,166 @@ export default function PagosMasivos({ tabInicial = 'importar' }: PagosMasivosPr
                           ${Number(r.Monto || 0).toLocaleString('es-CL')}
                         </td>
                         <td className="p-2.5">{r.Concepto}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          PESTAÑA 4: REPORTE DE LICENCIAS AUTORIZADAS POR PAGO INST. SALUD
+      ===================================================================== */}
+      {tabActiva === 'aut_pago' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-[#f1f5f9] pb-3">
+              <div>
+                <h2 className="text-sm font-bold text-emerald-800 uppercase tracking-wider">
+                  Reporte de Licencias Autorizadas por Recibo de Pago de Institución de Salud (`AUT_PAGO_SALUD`)
+                </h2>
+                <p className="text-xs text-[#64748b] mt-1">
+                  Licencias que figuraban como Rechazadas y pasaron automáticamente a Autorizadas al recibir pago de Subsidio o Aporte por parte de la Institución de Salud.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={anioAutPago}
+                  onChange={e => {
+                    setAnioAutPago(e.target.value);
+                    cargarReporteAutorizadasPorPago(e.target.value);
+                  }}
+                  className="px-3 py-2 text-xs border border-[#cbd5e1] rounded-lg bg-white font-semibold"
+                >
+                  <option value="">Todos los Años (Histórico)</option>
+                  {[2026, 2025, 2024, 2023, 2022, 2021, 2020].map(y => (
+                    <option key={y} value={String(y)}>
+                      Año {y}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => cargarReporteAutorizadasPorPago(anioAutPago)}
+                  disabled={cargandoAutPago}
+                  className="px-3.5 py-2 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                >
+                  {cargandoAutPago ? 'Cargando...' : 'Actualizar'}
+                </button>
+                <button
+                  onClick={() => exportarAutorizadasPorPagoExcel(registrosAutPago, anioAutPago || 'Historico')}
+                  disabled={registrosAutPago.length === 0}
+                  className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  📥 Exportar a Excel ({registrosAutPago.length})
+                </button>
+                <button
+                  onClick={() => {
+                    const totSub = registrosAutPago.reduce((a, r) => a + Number(r.MontoSubsidio || 0), 0);
+                    const totApo = registrosAutPago.reduce((a, r) => a + Number(r.MontoAporte || 0), 0);
+                    const totSal = registrosAutPago.reduce((a, r) => a + Number(r.MontoSaludTotal || 0), 0);
+                    exportToCorporatePDF({
+                      title: 'REPORTE DE LICENCIAS AUTORIZADAS POR PAGO DE INSTITUCIÓN DE SALUD',
+                      subtitle: `Filtro Año: ${anioAutPago || 'Histórico Completo'} — Estado AUT_PAGO_SALUD`,
+                      kpis: [
+                        { label: 'Licencias Regularizadas', value: registrosAutPago.length.toLocaleString('es-CL'), color: 'blue' },
+                        { label: 'Total Pagado Subsidio', value: formatCurrencyCLP(totSub), color: 'indigo' },
+                        { label: 'Total Pagado Aporte', value: formatCurrencyCLP(totApo), color: 'slate' },
+                        { label: 'Total Pagado Salud', value: formatCurrencyCLP(totSal), color: 'emerald' }
+                      ],
+                      columns: [
+                        { header: 'N° Licencia', key: 'NumeroLicencia' },
+                        { header: 'RUT', key: 'RutFmt' },
+                        { header: 'Funcionario', key: 'Funcionario' },
+                        { header: 'Sector / Estab.', key: 'SectorFmt' },
+                        { header: 'Inst. Salud', key: 'Salud' },
+                        { header: 'Desde / Hasta', key: 'PeriodoFmt', align: 'center' },
+                        { header: 'Días', key: 'NumDias', align: 'center' },
+                        { header: 'Subsidio', key: 'SubFmt', align: 'right' },
+                        { header: 'Aporte', key: 'ApoFmt', align: 'right' },
+                        { header: 'Total Pagado', key: 'TotFmt', align: 'right' }
+                      ],
+                      rows: registrosAutPago.slice(0, 1000).map(r => ({
+                        ...r,
+                        RutFmt: r.Rut ? `${r.Rut}-${r.DV}` : '-',
+                        SectorFmt: `${r.Sector} — ${r.Establecimiento}`,
+                        PeriodoFmt: `${formatDateDDMMYYYY(r.Desde)} al ${formatDateDDMMYYYY(r.Hasta)}`,
+                        SubFmt: formatCurrencyCLP(r.MontoSubsidio),
+                        ApoFmt: formatCurrencyCLP(r.MontoAporte),
+                        TotFmt: formatCurrencyCLP(r.MontoSaludTotal)
+                      })),
+                      totalsRow: {
+                        NumeroLicencia: 'TOTAL',
+                        SubFmt: formatCurrencyCLP(totSub),
+                        ApoFmt: formatCurrencyCLP(totApo),
+                        TotFmt: formatCurrencyCLP(totSal)
+                      }
+                    });
+                  }}
+                  disabled={registrosAutPago.length === 0}
+                  className="px-4 py-2 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78] disabled:opacity-50"
+                >
+                  📄 Exportar a PDF
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[500px]">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[#f1f5f9] text-[#475569] font-semibold sticky top-0">
+                  <tr>
+                    <th className="p-2.5">N° Licencia</th>
+                    <th className="p-2.5">RUT</th>
+                    <th className="p-2.5">Funcionario</th>
+                    <th className="p-2.5">Sector / Establecimiento</th>
+                    <th className="p-2.5">Inst. Salud</th>
+                    <th className="p-2.5">Desde / Hasta</th>
+                    <th className="p-2.5 text-center">Días</th>
+                    <th className="p-2.5 text-right">Pagado Subsidio</th>
+                    <th className="p-2.5 text-right">Pagado Aporte</th>
+                    <th className="p-2.5 text-right">Total Pagado Salud</th>
+                    <th className="p-2.5">Último Pago</th>
+                    <th className="p-2.5">Observación COMPIN</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#e2e8f0]">
+                  {registrosAutPago.length === 0 ? (
+                    <tr>
+                      <td colSpan={12} className="p-6 text-center text-[#94a3b8]">
+                        {cargandoAutPago ? 'Cargando registros...' : 'No se encontraron registros para el filtro seleccionado'}
+                      </td>
+                    </tr>
+                  ) : (
+                    registrosAutPago.map((r, idx) => (
+                      <tr key={idx} className="hover:bg-[#f8fafc]">
+                        <td className="p-2.5 font-bold text-[#016098]">{r.NumeroLicencia}</td>
+                        <td className="p-2.5 whitespace-nowrap font-semibold">
+                          {r.Rut ? `${r.Rut}-${r.DV}` : '-'}
+                        </td>
+                        <td className="p-2.5 font-medium">{r.Funcionario}</td>
+                        <td className="p-2.5">
+                          <span className="font-semibold">{r.Sector}</span> — {r.Establecimiento}
+                        </td>
+                        <td className="p-2.5 font-semibold text-slate-700">{r.Salud}</td>
+                        <td className="p-2.5 whitespace-nowrap">
+                          {formatDateDDMMYYYY(r.Desde)} al {formatDateDDMMYYYY(r.Hasta)}
+                        </td>
+                        <td className="p-2.5 text-center font-bold">{r.NumDias}</td>
+                        <td className="p-2.5 text-right text-sky-700 font-semibold">
+                          ${Number(r.MontoSubsidio || 0).toLocaleString('es-CL')}
+                        </td>
+                        <td className="p-2.5 text-right text-indigo-700 font-semibold">
+                          ${Number(r.MontoAporte || 0).toLocaleString('es-CL')}
+                        </td>
+                        <td className="p-2.5 text-right text-emerald-700 font-bold">
+                          ${Number(r.MontoSaludTotal || 0).toLocaleString('es-CL')}
+                        </td>
+                        <td className="p-2.5 whitespace-nowrap">{formatDateDDMMYYYY(r.UltimoPagoSalud)}</td>
+                        <td className="p-2.5 max-w-[260px] truncate text-emerald-800 font-medium" title={r.Observacion_Compin}>
+                          {r.Observacion_Compin}
+                        </td>
                       </tr>
                     ))
                   )}

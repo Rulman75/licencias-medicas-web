@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
+import {
+  exportToCorporatePDF,
+  exportCertificadoLicenciasFuncionarioPDF,
+  formatCurrencyCLP
+} from '../utils/exportUtils';
 
 interface MantencionLicenciasProps {
   modo?: 'normal' | 'mutual';
@@ -1497,6 +1502,29 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
               >
                 Exportar Historial a Excel
               </button>
+              <button
+                onClick={() => {
+                  exportCertificadoLicenciasFuncionarioPDF(
+                    {
+                      rut: funcionario?.Rut || '',
+                      dv: funcionario?.DV || '',
+                      nombre: funcionario?.Nombre,
+                      paterno: funcionario?.Paterno,
+                      materno: funcionario?.Materno,
+                      nombreCompleto: funcionario?.NombreCompleto,
+                      establecimiento: funcionario?.Unidad || '',
+                      planta: funcionario?.Planta || '',
+                      vigencia: funcionario?.Vigencia || 'S',
+                      fechaInicio: funcionario?.FechaInicio,
+                      fechaTermino: funcionario?.FechaTermino
+                    },
+                    historialLicenciasOrdenado
+                  );
+                }}
+                className="px-3.5 py-1.5 bg-[#016098] text-white text-xs font-semibold rounded-lg hover:bg-[#014b78] transition-colors"
+              >
+                Exportar Historial a PDF
+              </button>
             </div>
           )}
         </div>
@@ -1518,7 +1546,7 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
               <table className="w-full text-left text-xs">
                 <thead className="bg-emerald-100/70 text-emerald-950 font-semibold">
                   <tr>
-                    <th className="p-2">N° Documento / Cheque</th>
+                    <th className="p-2">N° Transferencia / Doc.</th>
                     <th className="p-2">Banco</th>
                     <th className="p-2">Fecha Depósito</th>
                     <th className="p-2">Concepto</th>

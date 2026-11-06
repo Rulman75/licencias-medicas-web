@@ -105,7 +105,8 @@ router.post('/previsualizar', async (req, res) => {
                     RTRIM(ISNULL(L.RutFuncionario, '')) as Rut,
                     RTRIM(ISNULL(F.Nombre, '')) + ' ' + RTRIM(ISNULL(F.Paterno, '')) + ' ' + RTRIM(ISNULL(F.Materno, '')) as NombreCompleto,
                     ISNULL(L.NumDias, 0) as NumDiasLicencia,
-                    ISNULL(L.PagoEstimado, 0) as PagoEstimado
+                    CASE WHEN ISNULL(L.PagoEstimado, 0) > 0 THEN ISNULL(L.PagoEstimado, 0) ELSE ISNULL(L.MontoDesc, 0) END as PagoEstimado,
+                    ISNULL(L.Rechazo, 0) as Rechazo
                 FROM LIC_LICENCIA_ACTUAL L
                 LEFT JOIN LIC_FUNCIONARIO F ON RTRIM(L.RutFuncionario) = RTRIM(F.Rut)
                 WHERE RTRIM(L.NumeroLicencia) IN (${params.join(',')})
@@ -119,6 +120,10 @@ router.post('/previsualizar', async (req, res) => {
         const resultado = registros.map((r, idx) => {
             const numLic = String(r.col1 || '').trim();
             const infoLic = mapaLicencias[numLic] || null;
+            const conceptoStr = String(r.col11 || '').trim();
+            const montoNum = parseInt(String(r.col8 || '0').replace(/\./g, '').replace(/,/g, ''), 10) || 0;
+            const eraRechazada = Boolean(infoLic && Number(infoLic.Rechazo) === 1);
+            const esPagoSalud = !['Descuento', 'DESCUENTO', 'Devolucion', 'DEVOLUCION'].includes(conceptoStr) && montoNum > 0;
             return {
                 fila: idx + 1,
                 col1: numLic,
@@ -131,22 +136,25 @@ router.post('/previsualizar', async (req, res) => {
                 col8: String(r.col8 || '0').trim(), // Monto
                 col9: String(r.col9 || '').trim(), // Observación
                 col10: String(r.col10 || '').trim(), // Fecha Recepción
-                col11: String(r.col11 || '').trim(), // Concepto
+                col11: conceptoStr, // Concepto
                 col12: String(r.col12 || '').trim(), // Banco
                 col13: String(r.col13 || '').trim(), // Cenco
                 existeLicencia: Boolean(infoLic),
                 rutFuncionario: infoLic ? infoLic.Rut : '',
                 nombreFuncionario: infoLic ? infoLic.NombreCompleto.trim() : 'LICENCIA NO INGRESADA',
-                pagoEstimado: infoLic ? infoLic.PagoEstimado : 0
+                pagoEstimado: infoLic ? infoLic.PagoEstimado : 0,
+                eraRechazada,
+                pasaAAutorizada: eraRechazada && esPagoSalud
             };
         });
 
         const totalLeidos = resultado.length;
         const totalValidos = resultado.filter(x => x.existeLicencia).length;
         const totalNoEncontrados = totalLeidos - totalValidos;
+        const totalPasanAAutorizadas = new Set(resultado.filter(x => x.pasaAAutorizada).map(x => x.col1)).size;
         const montoTotalValidos = resultado
             .filter(x => x.existeLicencia)
-            .reduce((acc, x) => acc + (parseInt(x.col8, 10) || 0), 0);
+            .reduce((acc, x) => acc + (parseInt(String(x.col8 || '0').replace(/\./g, '').replace(/,/g, ''), 10) || 0), 0);
 
         res.json({
             status: 'ok',
@@ -154,6 +162,7 @@ router.post('/previsualizar', async (req, res) => {
                 totalLeidos,
                 totalValidos,
                 totalNoEncontrados,
+                totalPasanAAutorizadas,
                 montoTotalValidos
             },
             registros: resultado
@@ -164,10 +173,11 @@ router.post('/previsualizar', async (req, res) => {
     }
 });
 
-// 3. Procesar e Insertar Pagos Masivos (Replica exacta de Frm_importar_pagos.vb Button2_Click)
+// 3. Procesar e Insertar Pagos Masivos (Replica exacta de Frm_importar_pagos.vb Button2_Click + Autorización automática de Falsos Rechazos)
 router.post('/procesar', async (req, res) => {
     const pool = req.db;
-    const transaction = new sql.Transaction(pool);
+    const rawPool = pool.mssqlPool || pool;
+    const transaction = new sql.Transaction(rawPool);
     try {
         const { registros } = req.body;
         if (!Array.isArray(registros) || registros.length === 0) {
@@ -182,6 +192,7 @@ router.post('/procesar', async (req, res) => {
         let leidos = 0;
         let insertados = 0;
         const licenciasNoEncontradas = [];
+        const licenciasAutorizadasMap = new Map();
 
         for (const r of registros) {
             leidos++;
@@ -221,14 +232,26 @@ router.post('/procesar', async (req, res) => {
                     VALUES (@c1, @c2, @c3, @c4, @c5, @c6, @c7, @c8, @c9, @c10, @c11, @c12, @c13)
                 `);
 
-            // Verificar si existe en LIC_LICENCIA_ACTUAL
+            // Verificar si existe en LIC_LICENCIA_ACTUAL y consultar su estado de Rechazo
             const checkLic = await new sql.Request(transaction)
                 .input('NumLic', sql.NVarChar, col1)
-                .query(`SELECT TOP 1 NumeroLicencia FROM LIC_LICENCIA_ACTUAL WHERE RTRIM(NumeroLicencia) = @NumLic`);
+                .query(`
+                    SELECT TOP 1
+                        RTRIM(L.NumeroLicencia) as NumeroLicencia,
+                        RTRIM(ISNULL(L.RutFuncionario, '')) as Rut,
+                        RTRIM(ISNULL(F.DV, ISNULL(L.dv, ''))) as DV,
+                        RTRIM(ISNULL(F.Nombre, '')) + ' ' + RTRIM(ISNULL(F.Paterno, '')) + ' ' + RTRIM(ISNULL(F.Materno, '')) as Funcionario,
+                        ISNULL(L.Rechazo, 0) as Rechazo,
+                        RTRIM(ISNULL(L.Observacion_Compin, '')) as ObservacionCompin
+                    FROM LIC_LICENCIA_ACTUAL L
+                    LEFT JOIN LIC_FUNCIONARIO F ON RTRIM(L.RutFuncionario) = RTRIM(F.Rut)
+                    WHERE RTRIM(L.NumeroLicencia) = @NumLic
+                `);
 
             if (checkLic.recordset.length === 0) {
                 licenciasNoEncontradas.push(col1);
             } else {
+                const licInfo = checkLic.recordset[0];
                 const fechaDepISO = parseFlexibleDate(col4);
                 const desdeISO = parseFlexibleDate(col6);
                 const hastaISO = parseFlexibleDate(col7);
@@ -260,22 +283,156 @@ router.post('/procesar', async (req, res) => {
                         )
                     `);
                 insertados++;
+
+                // Regla 1: Si estaba marcada como Rechazada y recibe un pago por Subsidio o Aporte, pasa a Autorizada
+                const esPagoSalud = !['Descuento', 'DESCUENTO', 'Devolucion', 'DEVOLUCION'].includes(col11) && monto > 0;
+                if (esPagoSalud && (Number(licInfo.Rechazo) === 1 || licenciasAutorizadasMap.has(col1))) {
+                    if (Number(licInfo.Rechazo) === 1) {
+                        await new sql.Request(transaction)
+                            .input('NumLicUpd', sql.NVarChar, col1)
+                            .query(`
+                                UPDATE LIC_LICENCIA_ACTUAL
+                                SET
+                                    Rechazo = 0,
+                                    Autorizada = 'True',
+                                    Estado = 'AUT_PAGO_SALUD',
+                                    Observacion_Compin = CASE
+                                        WHEN ISNULL(Observacion_Compin, '') LIKE '%AUTORIZADA POR PAGO INST. SALUD%'
+                                            THEN Observacion_Compin
+                                        WHEN LTRIM(RTRIM(ISNULL(Observacion_Compin, ''))) = ''
+                                            THEN '[AUTORIZADA POR PAGO INST. SALUD]'
+                                        ELSE LEFT(RTRIM(Observacion_Compin) + ' | [AUTORIZADA POR PAGO INST. SALUD]', 1000)
+                                    END
+                                WHERE RTRIM(NumeroLicencia) = @NumLicUpd
+                            `);
+                    }
+
+                    const prev = licenciasAutorizadasMap.get(col1) || {
+                        NumeroLicencia: col1,
+                        Rut: `${licInfo.Rut}-${licInfo.DV}`,
+                        Funcionario: (licInfo.Funcionario || '').trim(),
+                        NumeroDocumento: col3,
+                        Banco: col12,
+                        FechaPago: col4,
+                        Conceptos: [],
+                        MontoPagadoSalud: 0,
+                        ObservacionPrevia: licInfo.ObservacionCompin
+                    };
+                    if (!prev.Conceptos.includes(col11)) prev.Conceptos.push(col11);
+                    prev.MontoPagadoSalud += monto;
+                    licenciasAutorizadasMap.set(col1, prev);
+                }
             }
         }
 
         await transaction.commit();
 
+        const licenciasAutorizadasPorPago = Array.from(licenciasAutorizadasMap.values()).map(x => ({
+            ...x,
+            Conceptos: x.Conceptos.join(' + ')
+        }));
+
+        // Sincronizar también en PostgreSQL las licencias pasadas a Autorizadas si aplica
+        if (licenciasAutorizadasPorPago.length > 0 && pool.pgPool) {
+            for (const item of licenciasAutorizadasPorPago) {
+                await pool.request()
+                    .input('NumLicPg', sql.NVarChar, item.NumeroLicencia)
+                    .query(`
+                        UPDATE LIC_LICENCIA_ACTUAL
+                        SET
+                            Rechazo = 0,
+                            Autorizada = 'True',
+                            Estado = 'AUT_PAGO_SALUD',
+                            Observacion_Compin = CASE
+                                WHEN ISNULL(Observacion_Compin, '') LIKE '%AUTORIZADA POR PAGO INST. SALUD%'
+                                    THEN Observacion_Compin
+                                WHEN LTRIM(RTRIM(ISNULL(Observacion_Compin, ''))) = ''
+                                    THEN '[AUTORIZADA POR PAGO INST. SALUD]'
+                                ELSE LEFT(RTRIM(Observacion_Compin) + ' | [AUTORIZADA POR PAGO INST. SALUD]', 1000)
+                            END
+                        WHERE RTRIM(NumeroLicencia) = @NumLicPg
+                    `).catch(() => {});
+            }
+        }
+
         res.json({
             status: 'ok',
-            message: `Proceso Terminado — Leídos: ${leidos} registros, Insertados: ${insertados} registros`,
+            message: `Proceso Terminado — Leídos: ${leidos} registros, Insertados: ${insertados} registros${licenciasAutorizadasPorPago.length > 0 ? `, Licencias pasadas de Rechazada a Autorizada por Pago: ${licenciasAutorizadasPorPago.length}` : ''}`,
             leidos,
             insertados,
-            licenciasNoEncontradas
+            licenciasNoEncontradas,
+            licenciasAutorizadasPorPago
         });
     } catch (err) {
-        await transaction.rollback();
+        await transaction.rollback().catch(() => {});
         console.error('Error en POST /pagos-masivos/procesar:', err);
         res.status(500).json({ error: `Error procesando carga masiva: ${err.message}` });
+    }
+});
+
+// 3b. Reporte de Licencias que estaban Rechazadas y pasaron a Autorizadas por Recibo de Pago de Institución de Salud
+router.get('/autorizadas-por-pago', async (req, res) => {
+    try {
+        const pool = req.db;
+        const anio = req.query.year ? parseInt(req.query.year, 10) : null;
+        const reqDb = pool.request();
+        let whereAnio = '';
+        if (anio) {
+            reqDb.input('Anio', sql.Int, anio);
+            whereAnio = ' AND YEAR(L.Desde) = @Anio ';
+        }
+
+        const result = await reqDb.query(`
+            SELECT
+                YEAR(L.Desde) as Anio,
+                RTRIM(L.NumeroLicencia) as NumeroLicencia,
+                RTRIM(ISNULL(L.RutFuncionario, '')) as Rut,
+                RTRIM(ISNULL(F.DV, ISNULL(L.dv, ''))) as DV,
+                RTRIM(ISNULL(F.Nombre, '')) + ' ' + RTRIM(ISNULL(F.Paterno, '')) + ' ' + RTRIM(ISNULL(F.Materno, '')) as Funcionario,
+                RTRIM(ISNULL(F.vigencia, '')) as Vigencia,
+                ISNULL(F.CodUnidad, 0) as CodUnidad,
+                RTRIM(ISNULL(E.Descripcion, '')) as Establecimiento,
+                RTRIM(ISNULL(S.Descripcion, '')) as InstitucionSalud,
+                CONVERT(varchar, L.Recepcion, 23) as Recepcion,
+                CONVERT(varchar, L.Desde, 23) as Desde,
+                CONVERT(varchar, L.Hasta, 23) as Hasta,
+                ISNULL(L.NumDias, 0) as NumDias,
+                CASE WHEN ISNULL(L.PagoEstimado, 0) > 0 THEN ISNULL(L.PagoEstimado, 0) ELSE ISNULL(L.MontoDesc, 0) END as PagoEstimado,
+                ISNULL(DP.MontoSubsidio, 0) as MontoSubsidio,
+                ISNULL(DP.MontoAporte, 0) as MontoAporte,
+                ISNULL(DP.MontoSalud, 0) as MontoSaludTotal,
+                ISNULL(DP.MontoDescuento, 0) as MontoDescuento,
+                ISNULL(DP.MontoDevolucion, 0) as MontoDevolucion,
+                CONVERT(varchar, DP.UltimaFechaPago, 23) as FechaPagoSalud,
+                RTRIM(ISNULL(L.Observacion_Compin, '')) as ObservacionCompin
+            FROM LIC_LICENCIA_ACTUAL L
+            LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
+            LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
+            LEFT JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
+            LEFT JOIN (
+                SELECT
+                    NumeroLicencia,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') THEN ISNULL(Monto, 0) ELSE 0 END) as MontoSubsidio,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) = 'Aporte' THEN ISNULL(Monto, 0) ELSE 0 END) as MontoAporte,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) NOT IN ('Descuento', 'Devolucion') THEN ISNULL(Monto, 0) ELSE 0 END) as MontoSalud,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) = 'Descuento' THEN ISNULL(Monto, 0) ELSE 0 END) as MontoDescuento,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) = 'Devolucion' THEN ISNULL(Monto, 0) ELSE 0 END) as MontoDevolucion,
+                    MAX(CASE WHEN RTRIM(ISNULL(concepto, '')) NOT IN ('Descuento', 'Devolucion') THEN FechaDepCtaCte ELSE NULL END) as UltimaFechaPago
+                FROM LIC_DETALLE_PAGO_ACTUAL
+                GROUP BY NumeroLicencia
+            ) DP ON L.NumeroLicencia = DP.NumeroLicencia
+            WHERE RTRIM(ISNULL(L.Estado, '')) = 'AUT_PAGO_SALUD'
+              ${whereAnio}
+            ORDER BY L.Desde DESC
+        `);
+
+        res.json({
+            status: 'ok',
+            registros: result.recordset
+        });
+    } catch (err) {
+        console.error('Error en GET /pagos-masivos/autorizadas-por-pago:', err);
+        res.status(500).json({ error: 'Error consultando licencias autorizadas por pago' });
     }
 });
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
+import { exportToCorporatePDF } from '../utils/exportUtils';
 import {
   BarChart,
   Bar,
@@ -22,9 +23,11 @@ interface MesConvenioRow {
   TotalDiasAut: number;
   LicenciasPagadas: number;
   LicenciasSinPago: number;
+  LicenciasPagoParcialSalud?: number;
   LicenciasPorCobrarSalud: number;
   LicenciasSobrepago: number;
   LicenciasRechazadas: number;
+  AutorizadasPorPagoSaludCant?: number;
   FalsosRechazosPagadosCant: number;
   FalsosRechazosDobleCobroCant: number;
   FalsosRechazosCompinCant: number;
@@ -50,6 +53,7 @@ interface MesConvenioRow {
   MontoRechazadoRecuperable: number;
   MontoRechazadoIncobrable: number;
   MontoRechazadoRecuperado: number;
+  MontoAutorizadasPorPagoSalud?: number;
   MontoFalsoRechazoSalud: number;
   MontoRechazadoDescuentoFunc: number;
   FaltaPorCobrarTotal: number;
@@ -72,16 +76,16 @@ type FiltroDetalleTipo =
 
 const ETIQUETAS_FILTRO: Record<FiltroDetalleTipo, string> = {
   'todas': 'Todas las Licencias del Período',
-  'por-cobrar': 'Pendientes por Cobrar a Instituciones de Salud (No Rechazadas)',
+  'por-cobrar': 'Pendientes por Cobrar a Instituciones de Salud (Según regla FONASA ≤3d / >3d e ISAPRE)',
   'sin-pago': 'Licencias No Rechazadas en $0 (Sin Pago de Inst. de Salud aún)',
-  'pagadas': 'Licencias con Pago / Recupero Registrado',
+  'pagadas': 'Licencias Válidas Saldadas por Inst. de Salud (FONASA ≤3d Aporte, >3d Aporte+Subsidio, ISAPRE Pago)',
   'rechazadas': 'Todas las Licencias Marcadas como Rechazadas',
-  'falso-rechazo-salud': '⚠️ Falsos Rechazos: Marcadas Rechazadas pero Pagadas por Inst. de Salud (BCI)',
+  'falso-rechazo-salud': '⚡ Licencias Autorizadas Automáticamente por Recibo de Pago Inst. Salud (AUT_PAGO_SALUD)',
   'falso-rechazo-doble': '🚨 Doble Cobro: Pagadas por Inst. de Salud y además con Descuento al Funcionario',
-  'falso-rechazo-compin': '✅ Falsos Rechazos: Observación COMPIN dice "Autorizada / Ampliada"',
+  'falso-rechazo-compin': '✅ Observación COMPIN dice "Autorizada / Ampliada"',
   'rech-recuperables': 'Rechazadas Recuperables (Funcionario Vigente — Descuento por Remuneraciones)',
   'rech-incobrables': 'Rechazadas Incobrables (Funcionario No Vigente / Finiquitado)',
-  'rech-recuperadas': 'Rechazadas Ya Recuperadas (Descuento por Planilla / Devolución)'
+  'rech-recuperadas': 'Rechazadas Ya Recuperadas (Descuento por Remuneraciones)'
 };
 
 interface ControlConvenioMensualProps {
@@ -89,9 +93,10 @@ interface ControlConvenioMensualProps {
 }
 
 export default function ControlConvenioMensual({ initialYear }: ControlConvenioMensualProps) {
-  const defaultYear = initialYear && initialYear !== '' ? initialYear : String(new Date().getFullYear());
+  const defaultYear =
+    initialYear !== undefined ? (initialYear === '' ? 'historico' : initialYear) : String(new Date().getFullYear());
   const [anio, setAnio] = useState<string>(defaultYear);
-  const [mesSeleccionado, setMesSeleccionado] = useState<number>(0); // 0 = Acumulado Anual
+  const [mesSeleccionado, setMesSeleccionado] = useState<number>(0); // 0 = Acumulado Anual / Histórico
   const [criterio, setCriterio] = useState<'recepcion' | 'desde'>('desde');
   const [sector, setSector] = useState<string>('');
   const [vistaInferior, setVistaInferior] = useState<'tabla' | 'grafico'>('tabla');
@@ -111,8 +116,11 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
   const [ordenFechaDet, setOrdenFechaDet] = useState<'desc' | 'asc'>('desc');
 
   useEffect(() => {
-    if (initialYear && initialYear !== '' && initialYear !== anio) {
-      setAnio(initialYear);
+    if (initialYear !== undefined) {
+      const normalized = initialYear === '' ? 'historico' : initialYear;
+      if (normalized !== anio) {
+        setAnio(normalized);
+      }
     }
   }, [initialYear]);
 
@@ -182,7 +190,10 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
     }
   };
 
-  // Datos activos para los indicadores superiores (Mes seleccionado o Total Anual)
+  const esHistorico = anio === 'historico' || anio === '';
+  const etiquetaAnioCorto = esHistorico ? 'Histórico' : anio;
+
+  // Datos activos para los indicadores superiores (Mes seleccionado o Total Anual / Histórico)
   const kpiActivo =
     mesSeleccionado > 0
       ? mesesData.find(m => m.Mes === mesSeleccionado) || totalesAnuales
@@ -190,14 +201,16 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
 
   const tituloPeriodoActivo =
     mesSeleccionado > 0
-      ? `${mesesData.find(m => m.Mes === mesSeleccionado)?.MesNombre || ''} ${anio}`
+      ? `${mesesData.find(m => m.Mes === mesSeleccionado)?.MesNombre || ''} (${etiquetaAnioCorto})`
+      : esHistorico
+      ? 'Histórico (Todos los años)'
       : `Año Completo ${anio}`;
 
   // Exportar tabla resumen mensual a Excel
   const exportarResumenExcel = () => {
     if (mesesData.length === 0) return;
     const armarFila = (m: any, nombreMes: string) => ({
-      'Año': anio,
+      'Año / Período': esHistorico ? 'Histórico (Todos los años)' : anio,
       'Mes': nombreMes,
       'Criterio Fecha': criterio === 'recepcion' ? 'Mes Recepción (Tramitadas)' : 'Mes Inicio Reposo (Desde)',
       'Licencias Convenio Tramitadas': m.TotalLicencias,
@@ -293,38 +306,38 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
       },
       {
         'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
-        'Concepto / Indicador': '1. Licencias Válidas / En Trámite (Sin marca de rechazo)',
+        'Concepto / Indicador': '1. Licencias Válidas / Autorizadas (Sin marca de rechazo)',
         'Cantidad Licencias': noRechCant,
         'Monto ($)': Number(kpiActivo.EstimadoNoRechazado || 0),
-        'Detalle / Explicación': 'Licencias con Rechazo = 0 que deben ser pagadas por Inst. de Salud'
+        'Detalle / Explicación': `Licencias con Rechazo = 0 (incluye ${kpiActivo.AutorizadasPorPagoSaludCant || kpiActivo.FalsosRechazosPagadosCant || 0} autorizadas por recibo de pago de Inst. de Salud)`
       },
       {
         'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
-        'Concepto / Indicador': '   • Con pago recibido de Inst. de Salud (total o parcial)',
-        'Cantidad Licencias': noRechCant - Number(kpiActivo.LicenciasSinPago || 0),
+        'Concepto / Indicador': '   • Saldadas según regla Inst. de Salud (FONASA ≤3d Aporte, >3d Aporte+Subsidio, ISAPRE Pago)',
+        'Cantidad Licencias': Number(kpiActivo.LicenciasPagadas || 0),
         'Monto ($)': Number(kpiActivo.PagadoNoRechazado || 0),
-        'Detalle / Explicación': 'Licencias válidas que ya registran abono de FONASA/ISAPRE'
+        'Detalle / Explicación': 'Licencias válidas saldadas sin deuda pendiente de cobro a Inst. de Salud'
       },
       {
         'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
         'Concepto / Indicador': '   • En $0 esperando pago de Inst. de Salud',
         'Cantidad Licencias': Number(kpiActivo.LicenciasSinPago || 0),
         'Monto ($)': '',
-        'Detalle / Explicación': 'Licencias válidas sin ningún pago registrado aún'
+        'Detalle / Explicación': 'Licencias válidas sin ningún pago de Subsidio ni Aporte registrado aún'
       },
       {
         'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
-        'Concepto / Indicador': '   ↳ Total Válidas con saldo Falta por Cobrar a Inst. de Salud',
+        'Concepto / Indicador': '   ↳ Total Válidas Pendientes por Cobrar a Inst. de Salud',
         'Cantidad Licencias': Number(kpiActivo.LicenciasPorCobrarSalud || 0),
         'Monto ($)': Number(kpiActivo.FaltaPorCobrar || 0),
-        'Detalle / Explicación': 'Suma de licencias en $0 más licencias con pago parcial menor al estimado'
+        'Detalle / Explicación': `Licencias en $0 (${kpiActivo.LicenciasSinPago || 0}) + FONASA > 3 días con pago incompleto (${kpiActivo.LicenciasPagoParcialSalud || 0})`
       },
       {
         'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
         'Concepto / Indicador': '2. Licencias Marcadas como Rechazadas (Rechazo = 1)',
         'Cantidad Licencias': Number(kpiActivo.LicenciasRechazadas || 0),
         'Monto ($)': Number(kpiActivo.MontoRechazado || 0),
-        'Detalle / Explicación': 'Licencias marcadas con check de rechazo en el sistema'
+        'Detalle / Explicación': 'Licencias rechazadas sin pago de Inst. de Salud (toma PagoEstimado o MontoDesc si Estimado = 0)'
       },
       {
         'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
@@ -342,17 +355,17 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
       },
       {
         'Sección': 'A. COMPOSICIÓN DEL UNIVERSO DE LICENCIAS',
-        'Concepto / Indicador': '   • C/D. Licencias Rechazadas ya Saldadas (Descuento o Pago Inst. Salud)',
+        'Concepto / Indicador': '   • C. Licencias Rechazadas ya Recuperadas por Descuento al Funcionario',
         'Cantidad Licencias': saldadasRechCant,
         'Monto ($)': Number(kpiActivo.MontoRechazadoRecuperado || 0),
-        'Detalle / Explicación': `Incluye ${kpiActivo.RechazadasRecuperadasDescCant} con descuento al funcionario y ${kpiActivo.FalsosRechazosPagadosCant} Falsos Rechazos pagados por Inst. de Salud`
+        'Detalle / Explicación': `Descuento por remuneraciones aplicado al funcionario (${kpiActivo.RechazadasRecuperadasDescCant} licencias)`
       },
       {
         'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
         'Concepto / Indicador': 'Pago Estimado Total (Todas las licencias convenio)',
         'Cantidad Licencias': Number(kpiActivo.TotalLicencias || 0),
         'Monto ($)': Number(kpiActivo.TotalEstimado || 0),
-        'Detalle / Explicación': 'Proyección total sobre el universo de licencias convenio'
+        'Detalle / Explicación': 'Proyección total sobre el universo de licencias convenio (toma MontoDesc cuando PagoEstimado = 0)'
       },
       {
         'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
@@ -370,38 +383,31 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
       },
       {
         'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
-        'Concepto / Indicador': '   • Pagado por Inst. de Salud en licencias No Rechazadas',
-        'Cantidad Licencias': '',
-        'Monto ($)': Number(kpiActivo.PagadoNoRechazado || 0),
-        'Detalle / Explicación': 'Pagos BCI (Subsidio + Aporte) en licencias sin rechazo'
-      },
-      {
-        'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
-        'Concepto / Indicador': '   • (+) Pagado por Inst. de Salud en Falsos Rechazos',
-        'Cantidad Licencias': Number(kpiActivo.FalsosRechazosPagadosCant || 0),
-        'Monto ($)': Number(kpiActivo.MontoFalsoRechazoSalud || 0),
-        'Detalle / Explicación': `Licencias con Rechazo = 1 que igualmente fueron pagadas por Inst. de Salud (${kpiActivo.FalsosRechazosDobleCobroCant} con doble cobro)`
-      },
-      {
-        'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
-        'Concepto / Indicador': '(=) Total Pagado por Inst. de Salud (BCI = Subsidio + Aporte)',
-        'Cantidad Licencias': '',
+        'Concepto / Indicador': '(=) Total Pagado por Inst. de Salud (Exclusivamente Subsidio + Aporte)',
+        'Cantidad Licencias': Number(kpiActivo.LicenciasPagadas || 0),
         'Monto ($)': Number(kpiActivo.PagadoSaludTotal || 0),
-        'Detalle / Explicación': `Subsidio: ${formatCLP(kpiActivo.PagadoSubsidio)} + Aporte: ${formatCLP(kpiActivo.PagadoAporte)}`
+        'Detalle / Explicación': `Subsidio: ${formatCLP(kpiActivo.PagadoSubsidio)} + Aporte: ${formatCLP(kpiActivo.PagadoAporte)} (excluye Devoluciones y Descuentos)`
       },
       {
         'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
-        'Concepto / Indicador': '   • Falta por Cobrar a Inst. de Salud (Saldo en No Rechazadas)',
+        'Concepto / Indicador': '   • Del cual: Licencias Autorizadas por Pago de Inst. de Salud (AUT_PAGO_SALUD)',
+        'Cantidad Licencias': Number(kpiActivo.AutorizadasPorPagoSaludCant || kpiActivo.FalsosRechazosPagadosCant || 0),
+        'Monto ($)': Number(kpiActivo.MontoAutorizadasPorPagoSalud || kpiActivo.MontoFalsoRechazoSalud || 0),
+        'Detalle / Explicación': 'Licencias que figuraban rechazadas y pasaron a Autorizadas al recibir pago de Subsidio o Aporte'
+      },
+      {
+        'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
+        'Concepto / Indicador': '   • Falta por Cobrar a Inst. de Salud (Pendientes según regla FONASA / ISAPRE)',
         'Cantidad Licencias': Number(kpiActivo.LicenciasPorCobrarSalud || 0),
         'Monto ($)': Number(kpiActivo.FaltaPorCobrar || 0),
-        'Detalle / Explicación': 'Deuda pendiente por cobrar a FONASA / ISAPRE en licencias válidas'
+        'Detalle / Explicación': 'Deuda pendiente por cobrar a FONASA / ISAPRE en licencias aún no saldadas'
       },
       {
         'Sección': 'B. CUADRATURA FINANCIERA DE MONTOS ($)',
-        'Concepto / Indicador': 'Aparte — Recuperado por Descuento / Devolución a Funcionarios',
+        'Concepto / Indicador': 'Aparte — Recuperado por Descuento a Funcionarios (Licencias Rechazadas)',
         'Cantidad Licencias': Number(kpiActivo.RechazadasRecuperadasDescCant || 0),
         'Monto ($)': Number(kpiActivo.PagadoDescuentoFunc || 0),
-        'Detalle / Explicación': 'Recuperado por planilla de remuneraciones (no se suma a pagos de Inst. de Salud)'
+        'Detalle / Explicación': 'Recuperado por planilla en licencias rechazadas sin devolución (no se suma a pagos de Inst. de Salud)'
       }
     ];
 
@@ -466,9 +472,12 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
 </head>
 <body>
   <div class="header">
-    <div>
-      <div class="title">Guía de Cuadratura — Control Licencias Médicas Convenio</div>
-      <p class="subtitle">Corporación Municipal de Desarrollo Social de Antofagasta (CMDS)</p>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <img src="${window.location.origin}/logo.png" alt="Logo CMDS" style="height:46px; width:auto; object-fit:contain;" onerror="this.style.display='none'" />
+      <div>
+        <div class="title">Guía de Cuadratura — Control Licencias Médicas Convenio</div>
+        <p class="subtitle">Corporación Municipal de Desarrollo Social de Antofagasta (CMDS) — Unidad de Licencias Médicas</p>
+      </div>
     </div>
     <div class="meta-box">
       <div><b>Período:</b> ${tituloPeriodoActivo}</div>
@@ -517,29 +526,29 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
         <td>100% de las licencias convenio del período (Válidas + Rechazadas)</td>
       </tr>
       <tr class="highlight-green">
-        <td>1. Licencias Válidas / En Trámite (Sin marca de rechazo)</td>
+        <td>1. Licencias Válidas / Autorizadas (Sin marca de rechazo)</td>
         <td class="text-right">${noRechCant.toLocaleString('es-CL')} lic.</td>
-        <td>Licencias con Rechazo = 0 que deben ser reembolsadas por FONASA / ISAPRE</td>
+        <td>Licencias con Rechazo = 0 (incluye ${Number(kpiActivo.AutorizadasPorPagoSaludCant || kpiActivo.FalsosRechazosPagadosCant || 0)} autorizadas por pago Inst. Salud)</td>
       </tr>
       <tr>
-        <td style="padding-left:22px;">• Con pago recibido de Inst. de Salud (total o parcial)</td>
-        <td class="text-right"><b>${(noRechCant - Number(kpiActivo.LicenciasSinPago || 0)).toLocaleString('es-CL')} lic.</b></td>
-        <td>Licencias válidas que ya registran pago de Subsidio y/o Aporte en BCI</td>
+        <td style="padding-left:22px;">• Saldadas según regla Inst. de Salud (FONASA ≤3d Aporte, >3d Aporte+Subsidio, ISAPRE Pago)</td>
+        <td class="text-right"><b>${Number(kpiActivo.LicenciasPagadas || 0).toLocaleString('es-CL')} lic.</b></td>
+        <td>Licencias válidas consideradas saldadas (sin deuda exigible)</td>
       </tr>
       <tr>
         <td style="padding-left:22px;">• En $0 esperando pago de Inst. de Salud</td>
         <td class="text-right"><b>${Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')} lic.</b></td>
-        <td>Licencias válidas sin ningún pago registrado aún</td>
+        <td>Licencias válidas sin ningún pago de Subsidio ni Aporte aún</td>
       </tr>
       <tr>
-        <td style="padding-left:22px; color:#016098; font-weight:700;">↳ Total Válidas con saldo Falta por Cobrar a Inst. de Salud</td>
+        <td style="padding-left:22px; color:#016098; font-weight:700;">↳ Total Válidas Pendientes por Cobrar a Inst. de Salud</td>
         <td class="text-right" style="color:#016098; font-weight:700;">${Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic.</td>
-        <td>Suma de las licencias en $0 más las que tienen pago parcial inferior al estimado</td>
+        <td>Suma de licencias en $0 (${Number(kpiActivo.LicenciasSinPago || 0)}) + FONASA &gt; 3d con pago incompleto (${Number(kpiActivo.LicenciasPagoParcialSalud || 0)})</td>
       </tr>
       <tr class="highlight-rose">
         <td>2. Licencias Marcadas como Rechazadas (Rechazo = 1)</td>
         <td class="text-right">${Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} lic.</td>
-        <td>Licencias con marca de rechazo en la base de datos</td>
+        <td>Licencias rechazadas sin pago de Inst. de Salud (toma MontoDesc si PagoEstimado = 0)</td>
       </tr>
       <tr>
         <td style="padding-left:22px;">• A. Con saldo por descontar a Funcionario Vigente (Recuperables)</td>
@@ -552,9 +561,9 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
         <td>Ex-funcionarios finiquitados / no vigentes (Vigencia &lt;&gt; S)</td>
       </tr>
       <tr>
-        <td style="padding-left:22px;">• C/D. Licencias Rechazadas ya Saldadas (Descuento Func. o Pago Inst. Salud)</td>
+        <td style="padding-left:22px;">• C. Licencias Rechazadas ya Recuperadas por Descuento al Funcionario</td>
         <td class="text-right"><b>${saldadasRechCant.toLocaleString('es-CL')} lic.</b></td>
-        <td>Incluye ${kpiActivo.RechazadasRecuperadasDescCant} con Descuento/Devolución aplicado y ${kpiActivo.FalsosRechazosPagadosCant} Falsos Rechazos pagados por Inst. de Salud</td>
+        <td>Descuento por remuneraciones aplicado al funcionario (${kpiActivo.RechazadasRecuperadasDescCant} licencias)</td>
       </tr>
     </tbody>
   </table>
@@ -572,7 +581,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
       <tr>
         <td><b>Pago Estimado Total</b> (${Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')} licencias convenio)</td>
         <td class="text-right"><b>${formatCLP(kpiActivo.TotalEstimado)}</b></td>
-        <td>Suma total del subsidio estimado en todas las licencias convenio</td>
+        <td>Suma total del subsidio estimado (toma MontoDesc cuando PagoEstimado = 0)</td>
       </tr>
       <tr class="highlight-rose">
         <td>(-) Menos Estimado de Licencias Rechazadas (${Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} lic.)</td>
@@ -584,39 +593,34 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
         <td class="text-right">${formatCLP(kpiActivo.EstimadoNoRechazado)}</td>
         <td>Meta real exigible a FONASA / ISAPRE sobre las ${noRechCant.toLocaleString('es-CL')} licencias válidas</td>
       </tr>
-      <tr>
-        <td style="padding-left:22px;">• Pagado por Inst. de Salud en licencias No Rechazadas</td>
-        <td class="text-right"><b>${formatCLP(kpiActivo.PagadoNoRechazado)}</b></td>
-        <td>Ingresos BCI por Subsidio + Aporte en licencias válidas</td>
-      </tr>
-      <tr>
-        <td style="padding-left:22px;">• (+) Pagado por Inst. de Salud en Falsos Rechazos (${Number(kpiActivo.FalsosRechazosPagadosCant || 0)} lic.)</td>
-        <td class="text-right"><b>+ ${formatCLP(kpiActivo.MontoFalsoRechazoSalud)}</b></td>
-        <td>Licencias con Rechazo = 1 que igualmente fueron pagadas por Inst. de Salud (${kpiActivo.FalsosRechazosDobleCobroCant} con doble cobro)</td>
-      </tr>
       <tr class="highlight-green">
-        <td>(=) Total Pagado por Inst. de Salud (BCI = Subsidio + Aporte)</td>
+        <td>(=) Total Pagado por Inst. de Salud (Exclusivamente Subsidio + Aporte)</td>
         <td class="text-right">${formatCLP(kpiActivo.PagadoSaludTotal)}</td>
-        <td>Subsidio: ${formatCLP(kpiActivo.PagadoSubsidio)} + Aporte: ${formatCLP(kpiActivo.PagadoAporte)}</td>
+        <td>Subsidio: ${formatCLP(kpiActivo.PagadoSubsidio)} + Aporte: ${formatCLP(kpiActivo.PagadoAporte)} (excluye Devoluciones y Descuentos)</td>
       </tr>
       <tr>
-        <td style="padding-left:22px; color:#b45309; font-weight:700;">• Falta por Cobrar a Inst. de Salud (${Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic. válidas)</td>
+        <td style="padding-left:22px;">• Del cual: Licencias Autorizadas por Pago Inst. Salud (${Number(kpiActivo.AutorizadasPorPagoSaludCant || kpiActivo.FalsosRechazosPagadosCant || 0)} lic.)</td>
+        <td class="text-right"><b>${formatCLP(kpiActivo.MontoAutorizadasPorPagoSalud || kpiActivo.MontoFalsoRechazoSalud)}</b></td>
+        <td>Licencias que figuraban rechazadas y pasaron a Autorizadas al recibir pago de Subsidio o Aporte</td>
+      </tr>
+      <tr>
+        <td style="padding-left:22px; color:#b45309; font-weight:700;">• Falta por Cobrar a Inst. de Salud (${Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic. pendientes)</td>
         <td class="text-right" style="color:#b45309; font-weight:700;">${formatCLP(kpiActivo.FaltaPorCobrar)}</td>
-        <td>Saldo pendiente de cobro en licencias no rechazadas</td>
+        <td>Saldo pendiente según regla de negocio FONASA ≤3d / &gt;3d e ISAPRE</td>
       </tr>
       <tr class="highlight-teal">
-        <td>Aparte — Recuperado por Descuento / Devolución a Funcionarios (No se suma a Inst. Salud)</td>
+        <td>Aparte — Recuperado por Descuento a Funcionarios en Lic. Rechazadas</td>
         <td class="text-right">${formatCLP(kpiActivo.PagadoDescuentoFunc)}</td>
         <td>Recuperado por descuento de remuneraciones (${kpiActivo.RechazadasRecuperadasDescCant} lic. rechazadas)</td>
       </tr>
     </tbody>
   </table>
 
-  <div class="section-title">C. Resumen de Escenarios de Licencias Rechazadas (${Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} lic. · ${formatCLP(kpiActivo.MontoRechazado)})</div>
+  <div class="section-title">C. Resumen de Licencias Rechazadas y Autorizadas por Pago (${Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} lic. rech. · ${formatCLP(kpiActivo.MontoRechazado)})</div>
   <table>
     <thead>
       <tr>
-        <th>Escenario de Rechazo</th>
+        <th>Categoría</th>
         <th class="text-right">Licencias</th>
         <th class="text-right">Monto ($)</th>
         <th>Acción / Estado</th>
@@ -636,16 +640,16 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
         <td>Ex-funcionarios finiquitados: sin remuneración activa para descuento</td>
       </tr>
       <tr>
-        <td><b>C. Ya Recuperadas por Descuento / Devolución</b></td>
+        <td><b>C. Ya Recuperadas por Descuento al Funcionario</b></td>
         <td class="text-right">${Number(kpiActivo.RechazadasRecuperadasDescCant || 0).toLocaleString('es-CL')}</td>
         <td class="text-right"><b>${formatCLP(kpiActivo.MontoRechazadoDescuentoFunc)}</b></td>
         <td>Descuento por planilla ya aplicado al funcionario</td>
       </tr>
       <tr>
-        <td><b>D. ⚠️ Falsos Rechazos (Pagadas por Inst. de Salud)</b></td>
-        <td class="text-right">${Number(kpiActivo.FalsosRechazosPagadosCant || 0).toLocaleString('es-CL')}</td>
-        <td class="text-right"><b>${formatCLP(kpiActivo.MontoFalsoRechazoSalud)}</b></td>
-        <td>Pagadas en BCI (${kpiActivo.FalsosRechazosDobleCobroCant} con doble cobro y ${kpiActivo.FalsosRechazosCompinCant} autorizadas COMPIN)</td>
+        <td><b>D. ⚡ Autorizadas por Pago Inst. de Salud (AUT_PAGO_SALUD)</b></td>
+        <td class="text-right">${Number(kpiActivo.AutorizadasPorPagoSaludCant || kpiActivo.FalsosRechazosPagadosCant || 0).toLocaleString('es-CL')}</td>
+        <td class="text-right"><b>${formatCLP(kpiActivo.MontoAutorizadasPorPagoSalud || kpiActivo.MontoFalsoRechazoSalud)}</b></td>
+        <td>Pasaron automáticamente de Rechazadas a Autorizadas por recibir pago de Subsidio o Aporte</td>
       </tr>
     </tbody>
   </table>
@@ -671,9 +675,9 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
   // Filtrar y ordenar el detalle de licencias dentro del Modal
   const registrosDetalleFiltrados = registrosDetalle
     .filter(r => {
-      if (filtroEstadoDet === 'por-cobrar' && !(Number(r.FaltaPorCobrar || 0) > 0 && !r.Rechazo)) return false;
-      if (filtroEstadoDet === 'sin-pago' && !(Number(r.MontoPagado || 0) === 0 && !r.Rechazo)) return false;
-      if (filtroEstadoDet === 'pagadas' && !(Number(r.MontoPagado || 0) > 0)) return false;
+      if (filtroEstadoDet === 'por-cobrar' && !(r.EscenarioCobro === 'POR_COBRAR_SALUD' && !r.Rechazo)) return false;
+      if (filtroEstadoDet === 'sin-pago' && !(Number(r.MontoPagado || 0) === 0 && !r.Rechazo && !r.EsSaldadaSalud)) return false;
+      if (filtroEstadoDet === 'pagadas' && !(r.EsSaldadaSalud && !r.Rechazo)) return false;
       if (filtroEstadoDet === 'rechazadas' && !r.Rechazo) return false;
       if (filtroEstadoDet === 'falso-rechazo-salud' && !r.EsFalsoRechazoPagado) return false;
       if (filtroEstadoDet === 'falso-rechazo-doble' && !r.EsDobleCobro) return false;
@@ -814,9 +818,10 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
               }}
               className="border border-[#cbd5e1] rounded-lg px-3 py-1.5 text-xs font-bold text-[#016098] bg-[#f8fafc]"
             >
-              {['2026', '2025', '2024', '2023', '2022', '2021', '2020'].map(y => (
+              <option value="historico">Histórico (Todos los años)</option>
+              {['2026', '2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018'].map(y => (
                 <option key={y} value={y}>
-                  {y}
+                  Año {y}
                 </option>
               ))}
             </select>
@@ -829,10 +834,12 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
               onChange={e => setMesSeleccionado(Number(e.target.value))}
               className="border border-[#cbd5e1] rounded-lg px-3 py-1.5 text-xs font-semibold text-[#1e293b] bg-[#f8fafc]"
             >
-              <option value={0}>Año Completo ({anio})</option>
+              <option value={0}>
+                {esHistorico ? 'Total Histórico (Todos los años)' : `Año Completo (${anio})`}
+              </option>
               {mesesData.map(m => (
                 <option key={m.Mes} value={m.Mes}>
-                  {m.MesNombre} ({m.TotalLicencias} lic.)
+                  {m.MesNombre} ({m.TotalLicencias.toLocaleString('es-CL')} lic.)
                 </option>
               ))}
             </select>
@@ -869,12 +876,56 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
             </select>
           </div>
 
-          <button
-            onClick={exportarResumenExcel}
-            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors shadow-xs"
-          >
-            Descargar Resumen Anual Excel
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportarResumenExcel}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors shadow-xs"
+            >
+              📊 Resumen Anual Excel
+            </button>
+            <button
+              onClick={() => {
+                if (mesesData.length === 0) return;
+                exportToCorporatePDF({
+                  title: `Resumen Mensual Licencias Convenio — Año ${anio}`,
+                  subtitle: `Criterio: ${criterio === 'recepcion' ? 'Fecha Recepción (Tramitadas)' : 'Fecha Inicio Reposo (Desde)'} · Sector: ${sector === 'educacion' ? 'Educación' : sector === 'salud' ? 'Salud APS' : 'Todos'}`,
+                  orientation: 'landscape',
+                  columns: [
+                    { header: 'Mes', key: 'MesNombre' },
+                    { header: 'Total Lic.', key: 'TotalLicencias', align: 'center', format: v => Number(v || 0).toLocaleString('es-CL') },
+                    { header: 'Saldadas Salud', key: 'LicenciasPagadas', align: 'center', format: v => Number(v || 0).toLocaleString('es-CL') },
+                    { header: 'Por Cobrar', key: 'LicenciasPorCobrarSalud', align: 'center', format: v => Number(v || 0).toLocaleString('es-CL') },
+                    { header: 'Rechazadas', key: 'LicenciasRechazadas', align: 'center', format: v => Number(v || 0).toLocaleString('es-CL') },
+                    { header: 'Aut. Pago Salud', key: 'AutorizadasPorPagoSaludCant', align: 'center', format: (v, r) => Number(v || r.FalsosRechazosPagadosCant || 0).toLocaleString('es-CL') },
+                    { header: 'Estimado Total ($)', key: 'TotalEstimado', align: 'right', format: v => formatCLP(v) },
+                    { header: 'Meta Salud ($)', key: 'EstimadoNoRechazado', align: 'right', format: v => formatCLP(v) },
+                    { header: 'Pagado Salud ($)', key: 'PagadoSaludTotal', align: 'right', format: v => formatCLP(v) },
+                    { header: 'Falta Cobrar ($)', key: 'FaltaPorCobrar', align: 'right', format: v => formatCLP(v) },
+                    { header: 'Desc. Func. ($)', key: 'PagadoDescuentoFunc', align: 'right', format: v => formatCLP(v) }
+                  ],
+                  rows: mesesData,
+                  totalsRow: totalesAnuales
+                    ? {
+                        MesNombre: 'TOTAL ANUAL',
+                        TotalLicencias: Number(totalesAnuales.TotalLicencias || 0).toLocaleString('es-CL'),
+                        LicenciasPagadas: Number(totalesAnuales.LicenciasPagadas || 0).toLocaleString('es-CL'),
+                        LicenciasPorCobrarSalud: Number(totalesAnuales.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL'),
+                        LicenciasRechazadas: Number(totalesAnuales.LicenciasRechazadas || 0).toLocaleString('es-CL'),
+                        AutorizadasPorPagoSaludCant: Number(totalesAnuales.AutorizadasPorPagoSaludCant || totalesAnuales.FalsosRechazosPagadosCant || 0).toLocaleString('es-CL'),
+                        TotalEstimado: formatCLP(totalesAnuales.TotalEstimado),
+                        EstimadoNoRechazado: formatCLP(totalesAnuales.EstimadoNoRechazado),
+                        PagadoSaludTotal: formatCLP(totalesAnuales.PagadoSaludTotal),
+                        FaltaPorCobrar: formatCLP(totalesAnuales.FaltaPorCobrar),
+                        PagadoDescuentoFunc: formatCLP(totalesAnuales.PagadoDescuentoFunc)
+                      }
+                    : undefined
+                });
+              }}
+              className="px-3.5 py-1.5 bg-[#016098] hover:bg-[#014b78] text-white text-xs font-bold rounded-lg transition-colors shadow-xs"
+            >
+              📄 Resumen Anual PDF
+            </button>
+          </div>
         </div>
       </div>
 
@@ -892,7 +943,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                   onClick={() => setMesSeleccionado(0)}
                   className="text-xs font-bold text-[#016098] hover:underline"
                 >
-                  ← Volver a ver Año Completo {anio}
+                  ← Volver a ver {esHistorico ? 'Histórico (Todos los años)' : `Año Completo ${anio}`}
                 </button>
               )}
             </div>
@@ -1036,18 +1087,15 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                 <div className="space-y-1.5 text-[#334155]">
                   <div className="flex justify-between items-center bg-emerald-50/70 px-2.5 py-1.5 rounded border border-emerald-100">
                     <span>
-                      <b>1. Licencias Válidas / En Trámite</b> (Sin marca de rechazo):
+                      <b>1. Licencias Válidas / Autorizadas</b> (Sin marca de rechazo):
                     </span>
                     <b className="text-emerald-800">{licenciasNoRechazadasCant.toLocaleString('es-CL')} lic.</b>
                   </div>
                   <div className="pl-4 space-y-1 text-[11px] text-[#475569]">
                     <div className="flex justify-between">
-                      <span>• Con pago recibido de Inst. de Salud (total o parcial):</span>
-                      <b>
-                        {(
-                          licenciasNoRechazadasCant - Number(kpiActivo.LicenciasSinPago || 0)
-                        ).toLocaleString('es-CL')}{' '}
-                        lic.
+                      <span>• Saldadas según regla Inst. de Salud (FONASA ≤3d Aporte, &gt;3d Aporte+Subsidio, ISAPRE Pago):</span>
+                      <b className="text-emerald-700">
+                        {Number(kpiActivo.LicenciasPagadas || 0).toLocaleString('es-CL')} lic.
                       </b>
                     </div>
                     <div className="flex justify-between">
@@ -1058,7 +1106,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                     </div>
                     <div className="flex justify-between text-[#016098]">
                       <span>
-                        ↳ Total Válidas que aún tienen saldo <b>Falta por Cobrar a Inst. de Salud</b> (en $0 + pago parcial):
+                        ↳ Total Válidas Pendientes <b>Falta por Cobrar a Inst. de Salud</b> (en $0 + FONASA &gt;3d incompleto):
                       </span>
                       <b>{Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic.</b>
                     </div>
@@ -1086,7 +1134,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                       </b>
                     </div>
                     <div className="flex justify-between">
-                      <span>• Con Descuento/Devolución aplicado ({Number(kpiActivo.RechazadasRecuperadasDescCant || 0)} lic.) o Falso Rechazo pagado por Inst. de Salud ({Number(kpiActivo.FalsosRechazosPagadosCant || 0)} lic.):</span>
+                      <span>• Recuperadas por Descuento al Funcionario ({Number(kpiActivo.RechazadasRecuperadasDescCant || 0)} lic.):</span>
                       <b className="text-teal-700">
                         {(
                           Number(kpiActivo.LicenciasRechazadas || 0) -
@@ -1109,7 +1157,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
 
                 <div className="space-y-1.5 text-[#334155]">
                   <div className="flex justify-between items-center text-[11px]">
-                    <span>Pago Estimado Total ({Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')} lic.):</span>
+                    <span>Pago Estimado Total ({Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')} lic., usa MontoDesc si Estimado=0):</span>
                     <b>{formatCLP(kpiActivo.TotalEstimado)}</b>
                   </div>
                   <div className="flex justify-between items-center text-[11px] text-rose-700">
@@ -1122,27 +1170,23 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                   </div>
 
                   <div className="pl-3 space-y-1 text-[11px] border-l-2 border-emerald-400 my-1">
-                    <div className="flex justify-between">
-                      <span>• Pagado por Inst. de Salud en licencias No Rechazadas:</span>
-                      <b className="text-emerald-700">{formatCLP(kpiActivo.PagadoNoRechazado)}</b>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>• (+) Pagado por Inst. de Salud en Falsos Rechazos ({Number(kpiActivo.FalsosRechazosPagadosCant || 0)} lic.):</span>
-                      <b className="text-emerald-700">+ {formatCLP(kpiActivo.MontoFalsoRechazoSalud)}</b>
-                    </div>
                     <div className="flex justify-between font-bold text-emerald-900 bg-emerald-50/70 px-2 py-0.5 rounded">
-                      <span>(=) Total Pagado por Inst. de Salud (BCI = Subsidio + Aporte):</span>
+                      <span>(=) Total Pagado por Inst. de Salud (Exclusivamente Subsidio + Aporte):</span>
                       <span>{formatCLP(kpiActivo.PagadoSaludTotal)}</span>
                     </div>
+                    <div className="flex justify-between">
+                      <span>• Del cual: Autorizadas por Pago de Inst. de Salud ({Number(kpiActivo.AutorizadasPorPagoSaludCant || kpiActivo.FalsosRechazosPagadosCant || 0)} lic. `AUT_PAGO_SALUD`):</span>
+                      <b className="text-emerald-700">{formatCLP(kpiActivo.MontoAutorizadasPorPagoSalud || kpiActivo.MontoFalsoRechazoSalud)}</b>
+                    </div>
                     <div className="flex justify-between text-amber-800 pt-0.5">
-                      <span>• Falta por Cobrar a Inst. de Salud (Saldo de las {Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic. válidas):</span>
+                      <span>• Falta por Cobrar a Inst. de Salud ({Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic. pendientes según regla):</span>
                       <b>{formatCLP(kpiActivo.FaltaPorCobrar)}</b>
                     </div>
                   </div>
 
                   <div className="flex justify-between items-center bg-teal-50/80 px-2.5 py-1.5 rounded border border-teal-200 text-[11px] text-teal-950">
                     <span>
-                      <b>Aparte — Recuperado por Descuento / Devolución a Funcionarios</b> (No se suma a Inst. de Salud):
+                      <b>Aparte — Recuperado por Descuento a Funcionarios en Lic. Rechazadas</b> (Excluye Devoluciones):
                     </span>
                     <b className="text-teal-800">{formatCLP(kpiActivo.PagadoDescuentoFunc)}</b>
                   </div>
@@ -1157,7 +1201,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-rose-600"></span>
                 <h3 className="text-xs font-extrabold text-[#1e293b] uppercase tracking-wide">
-                  2. Desglose de las {Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} Licencias Marcadas como Rechazadas ({formatCLP(kpiActivo.MontoRechazado)})
+                  2. Desglose de las {Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} Licencias Rechazadas ({formatCLP(kpiActivo.MontoRechazado)}) y Autorizadas por Pago Inst. Salud
                 </h3>
               </div>
               <span className="text-[11px] text-[#64748b]">
@@ -1220,7 +1264,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                 </div>
               </div>
 
-              {/* Caja C: Ya Recuperadas por Descuento / Devolución */}
+              {/* Caja C: Ya Recuperadas por Descuento */}
               <div
                 onClick={() => abrirModalDetalle(mesSeleccionado, 'rech-recuperadas')}
                 className="bg-white hover:bg-emerald-50/40 cursor-pointer transition-all rounded-xl p-4 border border-emerald-200 shadow-2xs flex flex-col justify-between"
@@ -1238,7 +1282,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                     {formatCLP(kpiActivo.MontoRechazadoDescuentoFunc)}
                   </p>
                   <p className="text-xs text-[#475569] mt-1">
-                    Monto ya recuperado del funcionario mediante <b>Descuento por Remuneraciones</b> o Devolución.
+                    Monto ya recuperado del funcionario mediante <b>Descuento por Remuneraciones</b> (sin devolución).
                   </p>
                 </div>
                 <div className="mt-3 text-xs font-bold text-emerald-700 flex items-center justify-between pt-2 border-t border-slate-100">
@@ -1247,30 +1291,29 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                 </div>
               </div>
 
-              {/* Caja D: Falsos Rechazos (Pagadas por Inst. de Salud o Autorizadas COMPIN) */}
+              {/* Caja D: Autorizadas por Pago de Inst. de Salud (AUT_PAGO_SALUD) */}
               <div
                 onClick={() => abrirModalDetalle(mesSeleccionado, 'falso-rechazo-salud')}
-                className="bg-white hover:bg-orange-50/50 cursor-pointer transition-all rounded-xl p-4 border-2 border-orange-300 shadow-2xs flex flex-col justify-between"
+                className="bg-white hover:bg-amber-50/50 cursor-pointer transition-all rounded-xl p-4 border-2 border-amber-300 shadow-2xs flex flex-col justify-between"
               >
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-orange-100 text-orange-900">
-                      D. ⚠️ Falsos Rechazos
+                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase bg-amber-100 text-amber-900">
+                      D. ⚡ Autorizadas por Pago Salud
                     </span>
-                    <span className="text-xs font-extrabold text-orange-800">
-                      {Number(kpiActivo.FalsosRechazosPagadosCant || 0).toLocaleString('es-CL')} pag. Inst. Salud
+                    <span className="text-xs font-extrabold text-amber-800">
+                      {Number(kpiActivo.AutorizadasPorPagoSaludCant || kpiActivo.FalsosRechazosPagadosCant || 0).toLocaleString('es-CL')} lic.
                     </span>
                   </div>
-                  <p className="text-xl font-extrabold text-orange-700 mt-2">
-                    {formatCLP(kpiActivo.MontoFalsoRechazoSalud)}
+                  <p className="text-xl font-extrabold text-amber-700 mt-2">
+                    {formatCLP(kpiActivo.MontoAutorizadasPorPagoSalud || kpiActivo.MontoFalsoRechazoSalud)}
                   </p>
                   <p className="text-xs text-[#475569] mt-1">
-                    Figuran con check Rechazo, pero <b>la Inst. de Salud las pagó en BCI</b> ({kpiActivo.FalsosRechazosDobleCobroCant} con
-                    doble cobro y {kpiActivo.FalsosRechazosCompinCant} autorizadas COMPIN).
+                    Figuraban como Rechazadas y <b>pasaron automáticamente a Autorizadas</b> al recibir pago de Subsidio o Aporte.
                   </p>
                 </div>
-                <div className="mt-3 text-xs font-bold text-orange-800 flex items-center justify-between pt-2 border-t border-orange-100">
-                  <span>Revisar falsos rechazos</span>
+                <div className="mt-3 text-xs font-bold text-amber-800 flex items-center justify-between pt-2 border-t border-amber-100">
+                  <span>Ver autorizadas por pago</span>
                   <span>→</span>
                 </div>
               </div>
@@ -1283,7 +1326,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
       <div className="space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <h3 className="text-xs font-extrabold text-[#334155] uppercase tracking-wide">
-            3. Detalle Mes a Mes ({anio}) — Haga clic en &quot;Abrir Detalle&quot; en cualquier mes
+            3. Detalle Mes a Mes ({esHistorico ? 'Acumulado Histórico Todos los Años' : `Año ${anio}`}) — Haga clic en &quot;Abrir Detalle&quot; en cualquier mes
           </h3>
           <div className="inline-flex rounded-lg border border-[#cbd5e1] bg-[#f8fafc] p-0.5 self-start">
             <button
@@ -1394,16 +1437,16 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
 
                 {totalesAnuales && !cargando && (
                   <tr className="bg-[#f1f5f9] font-extrabold text-[#1e293b] border-t-2 border-[#cbd5e1]">
-                    <td className="p-2.5 text-[#016098]">TOTAL {anio}</td>
+                    <td className="p-2.5 text-[#016098]">TOTAL {esHistorico ? 'HISTÓRICO' : anio}</td>
                     <td className="p-2.5 text-center">{totalesAnuales.TotalLicencias.toLocaleString('es-CL')}</td>
                     <td className="p-2.5 text-right">{formatCLP(totalesAnuales.EstimadoNoRechazado)}</td>
                     <td className="p-2.5 text-right text-emerald-700">{formatCLP(totalesAnuales.PagadoSaludTotal)}</td>
                     <td className="p-2.5 text-right text-amber-700">{formatCLP(totalesAnuales.FaltaPorCobrar)}</td>
                     <td className="p-2.5 text-right text-indigo-700">{formatCLP(totalesAnuales.PagadoDescuentoFunc)}</td>
                     <td className="p-2.5 text-center">
-                      {totalesAnuales.LicenciasRechazadas} (
-                      <span className="text-indigo-700">{totalesAnuales.RechazadasRecuperablesCant}</span> vig. /{' '}
-                      <span className="text-rose-700">{totalesAnuales.RechazadasIncobrablesCant}</span> incob.)
+                      {totalesAnuales.LicenciasRechazadas.toLocaleString('es-CL')} (
+                      <span className="text-indigo-700">{totalesAnuales.RechazadasRecuperablesCant.toLocaleString('es-CL')}</span> vig. /{' '}
+                      <span className="text-rose-700">{totalesAnuales.RechazadasIncobrablesCant.toLocaleString('es-CL')}</span> incob.)
                     </td>
                     <td className="p-2.5 text-center">
                       <button
@@ -1411,7 +1454,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                         onClick={() => abrirModalDetalle(0, 'todas')}
                         className="px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold rounded-md"
                       >
-                        Abrir Todo {anio}
+                        Abrir Todo ({esHistorico ? 'Histórico' : anio})
                       </button>
                     </td>
                   </tr>
@@ -1438,7 +1481,9 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#016098] text-white uppercase">
                     {mesDetalle > 0
-                      ? `${mesesData.find(m => m.Mes === mesDetalle)?.MesNombre || ''} ${anio}`
+                      ? `${mesesData.find(m => m.Mes === mesDetalle)?.MesNombre || ''} (${etiquetaAnioCorto})`
+                      : esHistorico
+                      ? 'Histórico (Todos los años)'
                       : `Año Completo ${anio}`}
                   </span>
                   <h3 className="text-base font-extrabold text-[#1e293b]">
@@ -1463,9 +1508,53 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                 <button
                   onClick={exportarDetalleExcel}
                   disabled={registrosDetalleFiltrados.length === 0}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs disabled:opacity-50"
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs disabled:opacity-50"
                 >
-                  Descargar a Excel ({registrosDetalleFiltrados.length})
+                  📊 Excel ({registrosDetalleFiltrados.length})
+                </button>
+                <button
+                  onClick={() => {
+                    if (registrosDetalleFiltrados.length === 0) return;
+                    exportToCorporatePDF({
+                      title: `Detalle de Licencias Convenio — ${tituloPeriodoActivo}`,
+                      subtitle: `Filtro activo: ${filtroEstadoDet.toUpperCase()}`,
+                      orientation: 'landscape',
+                      summaryCards: [
+                        { label: 'Total Licencias', value: registrosDetalleFiltrados.length.toLocaleString('es-CL') },
+                        { label: 'Estimado Total', value: formatCLP(sumaEstimadoModal) },
+                        { label: 'Pagado Inst. Salud', value: formatCLP(sumaSaludModal), color: 'green' },
+                        { label: 'Saldo Pendiente', value: formatCLP(sumaPendModal), color: 'amber' }
+                      ],
+                      columns: [
+                        { header: 'N° Licencia', key: 'NumeroLicencia' },
+                        { header: 'RUT', key: 'Rut' },
+                        { header: 'Funcionario', key: 'Funcionario' },
+                        { header: 'Vig.', key: 'Vigencia', align: 'center' },
+                        { header: 'Establecimiento', key: 'Establecimiento' },
+                        { header: 'Inst. Salud', key: 'InstitucionSalud' },
+                        { header: 'Recepción', key: 'Recepcion', align: 'center', format: v => formatDateDDMMYYYY(v) },
+                        { header: 'Desde', key: 'Desde', align: 'center', format: v => formatDateDDMMYYYY(v) },
+                        { header: 'Días', key: 'NumDias', align: 'center' },
+                        { header: 'Estimado ($)', key: 'PagoEstimado', align: 'right', format: v => formatCLP(v) },
+                        { header: 'Pagado Salud ($)', key: 'MontoPagadoSalud', align: 'right', format: v => formatCLP(v) },
+                        { header: 'Desc. Func. ($)', key: 'MontoDescuentoFunc', align: 'right', format: v => formatCLP(v) },
+                        { header: 'Saldo Pend. ($)', key: 'SaldoPorCobrar', align: 'right', format: v => formatCLP(v) },
+                        { header: 'Estado', key: 'EscenarioCobro' }
+                      ],
+                      rows: registrosDetalleFiltrados,
+                      totalsRow: {
+                        NumeroLicencia: 'TOTALES',
+                        PagoEstimado: formatCLP(sumaEstimadoModal),
+                        MontoPagadoSalud: formatCLP(sumaSaludModal),
+                        MontoDescuentoFunc: formatCLP(sumaDescModal),
+                        SaldoPorCobrar: formatCLP(sumaPendModal)
+                      }
+                    });
+                  }}
+                  disabled={registrosDetalleFiltrados.length === 0}
+                  className="px-3.5 py-2 bg-[#016098] hover:bg-[#014b78] text-white text-xs font-bold rounded-lg shadow-xs disabled:opacity-50"
+                >
+                  📄 PDF ({registrosDetalleFiltrados.length})
                 </button>
                 <button
                   onClick={() => setMostrarDetalle(false)}
@@ -1482,8 +1571,12 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                 {[
                   { id: 'todas', label: `Todas (${registrosDetalle.length})` },
                   {
+                    id: 'pagadas',
+                    label: `✅ Saldadas Inst. Salud (${registrosDetalle.filter(r => r.EsSaldadaSalud && !r.Rechazo).length})`
+                  },
+                  {
                     id: 'por-cobrar',
-                    label: `Por Cobrar Inst. Salud (${registrosDetalle.filter(r => Number(r.FaltaPorCobrar || 0) > 0 && !r.Rechazo).length})`
+                    label: `⏳ Por Cobrar Inst. Salud (${registrosDetalle.filter(r => r.EscenarioCobro === 'POR_COBRAR_SALUD' && !r.Rechazo).length})`
                   },
                   {
                     id: 'rech-recuperables',
@@ -1499,15 +1592,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                   },
                   {
                     id: 'falso-rechazo-salud',
-                    label: `🟧 Falsos Rechazos Pag. Inst. Salud (${registrosDetalle.filter(r => r.EsFalsoRechazoPagado).length})`
-                  },
-                  {
-                    id: 'falso-rechazo-doble',
-                    label: `🚨 Doble Cobro (${registrosDetalle.filter(r => r.EsDobleCobro).length})`
-                  },
-                  {
-                    id: 'falso-rechazo-compin',
-                    label: `✅ COMPIN Autorizada (${registrosDetalle.filter(r => r.EsFalsoRechazoCompin).length})`
+                    label: `⚡ Autorizadas por Pago Salud (${registrosDetalle.filter(r => r.EsFalsoRechazoPagado).length})`
                   }
                 ].map(f => (
                   <button
@@ -1635,37 +1720,29 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                             </span>
                           </td>
                           <td className="p-2.5 whitespace-nowrap">
-                            {r.EsDobleCobro ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900 border border-rose-300">
-                                🚨 Doble Cobro (Inst. Salud + Desc.)
-                              </span>
-                            ) : r.EsFalsoRechazoPagado ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-900 border border-orange-300">
-                                ⚠️ Falso Rech. (Pagó Inst. Salud)
-                              </span>
-                            ) : r.EsFalsoRechazoCompin ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-100 text-teal-900">
-                                ✅ COMPIN Autorizada
+                            {r.EsFalsoRechazoPagado ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                ⚡ {r.SituacionCobroLabel || 'Autorizada por Pago Salud'}
                               </span>
                             ) : r.EscenarioCobro === 'RECHAZADA_RECUPERABLE' ? (
                               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900">
-                                Rech. Recuperable (Vigente)
+                                {r.SituacionCobroLabel || 'Rech. Recuperable (Vigente)'}
                               </span>
                             ) : r.EscenarioCobro === 'RECHAZADA_INCOBRABLE' ? (
                               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900">
-                                Rech. Incobrable (No Vigente)
+                                {r.SituacionCobroLabel || 'Rech. Incobrable (No Vigente)'}
                               </span>
                             ) : r.EscenarioCobro === 'RECHAZADA_RECUPERADA' ? (
                               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900">
-                                Rech. Recuperada (Desc.)
+                                {r.SituacionCobroLabel || 'Rech. Recuperada (Desc.)'}
                               </span>
                             ) : r.EscenarioCobro === 'POR_COBRAR_SALUD' ? (
                               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">
-                                Por Cobrar Inst. Salud
+                                {r.SituacionCobroLabel || 'Por Cobrar Inst. Salud'}
                               </span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
-                                {r.SituacionCobroLabel || 'Pagada'}
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                {r.SituacionCobroLabel || 'Saldada'}
                               </span>
                             )}
                           </td>

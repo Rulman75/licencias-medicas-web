@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
+import {
+  exportToCorporatePDF,
+  exportCertificadoLicenciasFuncionarioPDF,
+  formatCurrencyCLP
+} from '../utils/exportUtils';
 
 type TabInforme = 'por-funcionario' | 'diarias' | 'brp' | 'pago-directo' | 'general-pagos' | 'softland';
 
@@ -427,39 +432,100 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
                       Orden Desde: {ordenDesdeFunc === 'desc' ? 'Más recientes ▼' : 'Más antiguas ▲'}
                     </button>
                   </div>
-                  <button
-                    onClick={() =>
-                      exportarGenericoExcel(
-                        [...licenciasRango]
-                          .sort((a, b) =>
-                            ordenDesdeFunc === 'asc'
-                              ? String(a.Desde || '').localeCompare(String(b.Desde || ''))
-                              : String(b.Desde || '').localeCompare(String(a.Desde || ''))
-                          )
-                          .map(l => ({
-                            'RUT': `${l.Rut}-${l.DV}`,
-                            'Funcionario': (l.NombreCompleto || '').trim(),
-                            'Establecimiento': `${l.CodUnidad} - ${l.Establecimiento}`,
-                            'N° Licencia': l.NumeroLicencia,
-                            'Desde': formatDateDDMMYYYY(l.Desde),
-                            'Hasta': formatDateDDMMYYYY(l.Hasta),
-                            'Días Lic.': l.NumDias,
-                            'Días Aut.': l.DiasAutorizados,
-                            'Modalidad': l.PagoDirecto,
-                            'Tipo Enferm.': l.TipoEnferm,
-                            'Pago Estimado ($)': l.PagoEstimado,
-                            'Monto Pagado ($)': l.MontoPagadoDetalle || l.TotalPagadoTabla,
-                            'Rechazo': l.Rechazo ? 'SI' : 'NO',
-                            'Observación': l.Observacion,
-                            'Obs. Apelación': l.ObserApelacion
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() =>
+                        exportarGenericoExcel(
+                          [...licenciasRango]
+                            .sort((a, b) =>
+                              ordenDesdeFunc === 'asc'
+                                ? String(a.Desde || '').localeCompare(String(b.Desde || ''))
+                                : String(b.Desde || '').localeCompare(String(a.Desde || ''))
+                            )
+                            .map(l => ({
+                              'RUT': `${l.Rut}-${l.DV}`,
+                              'Funcionario': (l.NombreCompleto || '').trim(),
+                              'Establecimiento': `${l.CodUnidad} - ${l.Establecimiento}`,
+                              'N° Licencia': l.NumeroLicencia,
+                              'Desde': formatDateDDMMYYYY(l.Desde),
+                              'Hasta': formatDateDDMMYYYY(l.Hasta),
+                              'Días Lic.': l.NumDias,
+                              'Días Aut.': l.DiasAutorizados,
+                              'Modalidad': l.PagoDirecto,
+                              'Tipo Enferm.': l.TipoEnferm,
+                              'Pago Estimado ($)': l.PagoEstimado,
+                              'Monto Pagado ($)': l.MontoPagadoDetalle || l.TotalPagadoTabla,
+                              'Rechazo': l.Rechazo ? 'SI' : 'NO',
+                              'Observación': l.Observacion,
+                              'Obs. Apelación': l.ObserApelacion
+                            })),
+                          `Licencias_Funcionarios_Rango_${desdeFunc || 'Inicio'}_a_${hastaFunc || 'Fin'}`
+                        )
+                      }
+                      className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                    >
+                      Exportar a Excel
+                    </button>
+                    <button
+                      onClick={() => {
+                        const sorted = [...licenciasRango].sort((a, b) =>
+                          ordenDesdeFunc === 'asc'
+                            ? String(a.Desde || '').localeCompare(String(b.Desde || ''))
+                            : String(b.Desde || '').localeCompare(String(a.Desde || ''))
+                        );
+                        const totEst = sorted.reduce((acc, l) => acc + Number(l.PagoEstimado || 0), 0);
+                        const totPag = sorted.reduce(
+                          (acc, l) => acc + Number(l.MontoPagadoDetalle || l.TotalPagadoTabla || 0),
+                          0
+                        );
+                        exportToCorporatePDF({
+                          title: 'REPORTE DE LICENCIAS MÉDICAS POR RANGO DE FECHAS',
+                          subtitle: `Período Consultado: ${desdeFunc ? formatDateDDMMYYYY(desdeFunc) : 'Inicio'} al ${
+                            hastaFunc ? formatDateDDMMYYYY(hastaFunc) : 'Actualidad'
+                          }`,
+                          meta: [
+                            { label: 'Desde', value: desdeFunc ? formatDateDDMMYYYY(desdeFunc) : 'Todos' },
+                            { label: 'Hasta', value: hastaFunc ? formatDateDDMMYYYY(hastaFunc) : 'Todos' }
+                          ],
+                          kpis: [
+                            { label: 'Total Licencias', value: sorted.length, color: 'blue' },
+                            { label: 'Total Pago Estimado', value: formatCurrencyCLP(totEst), color: 'indigo' },
+                            { label: 'Total Monto Pagado', value: formatCurrencyCLP(totPag), color: 'emerald' }
+                          ],
+                          columns: [
+                            { header: 'RUT', key: 'RutFmt' },
+                            { header: 'Funcionario', key: 'FuncFmt' },
+                            { header: 'Establecimiento', key: 'EstabFmt' },
+                            { header: 'N° Licencia', key: 'NumeroLicencia' },
+                            { header: 'Desde', key: 'DesdeFmt', align: 'center' },
+                            { header: 'Hasta', key: 'HastaFmt', align: 'center' },
+                            { header: 'Días', key: 'NumDias', align: 'center' },
+                            { header: 'Modalidad', key: 'PagoDirecto' },
+                            { header: 'Pago Estimado', key: 'EstimadoFmt', align: 'right' },
+                            { header: 'Monto Pagado', key: 'PagadoFmt', align: 'right' }
+                          ],
+                          rows: sorted.map(l => ({
+                            ...l,
+                            RutFmt: `${l.Rut}-${l.DV}`,
+                            FuncFmt: (l.NombreCompleto || '').trim(),
+                            EstabFmt: `${l.CodUnidad || ''} ${l.Establecimiento || ''}`.trim(),
+                            DesdeFmt: formatDateDDMMYYYY(l.Desde),
+                            HastaFmt: formatDateDDMMYYYY(l.Hasta),
+                            EstimadoFmt: formatCurrencyCLP(l.PagoEstimado),
+                            PagadoFmt: formatCurrencyCLP(l.MontoPagadoDetalle || l.TotalPagadoTabla || 0)
                           })),
-                        `Licencias_Funcionarios_Rango_${desdeFunc || 'Inicio'}_a_${hastaFunc || 'Fin'}`
-                      )
-                    }
-                    className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
-                  >
-                    Exportar Rango a Excel
-                  </button>
+                          totalsRow: {
+                            RutFmt: 'TOTALES',
+                            EstimadoFmt: formatCurrencyCLP(totEst),
+                            PagadoFmt: formatCurrencyCLP(totPag)
+                          }
+                        });
+                      }}
+                      className="px-4 py-1.5 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                    >
+                      Exportar a PDF
+                    </button>
+                  </div>
                 </div>
 
                 <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[420px]">
@@ -523,40 +589,89 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
 
             {/* Coincidencias por Apellido */}
             {listaCoincidencias.length > 0 && (
-              <div className="border border-[#e2e8f0] rounded-xl overflow-x-auto max-h-[220px]">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-[#f1f5f9] text-[#475569] sticky top-0">
-                    <tr>
-                      <th className="p-2">RUT</th>
-                      <th className="p-2">Nombre Completo</th>
-                      <th className="p-2">Cenco / Establecimiento</th>
-                      <th className="p-2">Planta</th>
-                      <th className="p-2 text-center">Acción</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#e2e8f0]">
-                    {listaCoincidencias.map(f => (
-                      <tr key={f.Rut} className="hover:bg-[#f8fafc]">
-                        <td className="p-2 font-bold text-[#016098]">
-                          {f.Rut}-{f.DV}
-                        </td>
-                        <td className="p-2 font-semibold">{`${f.Nombre} ${f.Paterno} ${f.Materno}`.trim()}</td>
-                        <td className="p-2">
-                          {f.CodUnidad} — {f.Establecimiento}
-                        </td>
-                        <td className="p-2">{f.Planta}</td>
-                        <td className="p-2 text-center">
-                          <button
-                            onClick={() => buscarPorFuncionario(f.Rut)}
-                            className="px-3 py-1 bg-[#016098] text-white rounded text-[11px] font-bold"
-                          >
-                            Ver Ficha
-                          </button>
-                        </td>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold text-[#016098]">
+                    Funcionarios Encontrados ({listaCoincidencias.length})
+                  </span>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() =>
+                        exportarGenericoExcel(
+                          listaCoincidencias.map(f => ({
+                            'RUT': `${f.Rut}-${f.DV}`,
+                            'Nombre Completo': `${f.Nombre} ${f.Paterno} ${f.Materno}`.trim(),
+                            'Cenco': f.CodUnidad,
+                            'Establecimiento': f.Establecimiento,
+                            'Planta': f.Planta
+                          })),
+                          `Funcionarios_Apellido_${paternoFunc || 'Consulta'}`
+                        )
+                      }
+                      className="px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                    >
+                      Exportar a Excel
+                    </button>
+                    <button
+                      onClick={() =>
+                        exportToCorporatePDF({
+                          title: 'LISTADO DE FUNCIONARIOS COINCIDENTES',
+                          subtitle: `Filtro Apellido Paterno: ${paternoFunc || 'Todos'}`,
+                          columns: [
+                            { header: 'RUT', key: 'RutFmt' },
+                            { header: 'Nombre Completo', key: 'NombreFmt' },
+                            { header: 'Cenco / Establecimiento', key: 'EstabFmt' },
+                            { header: 'Planta', key: 'Planta' }
+                          ],
+                          rows: listaCoincidencias.map(f => ({
+                            RutFmt: `${f.Rut}-${f.DV}`,
+                            NombreFmt: `${f.Nombre} ${f.Paterno} ${f.Materno}`.trim(),
+                            EstabFmt: `${f.CodUnidad || ''} — ${f.Establecimiento || ''}`,
+                            Planta: f.Planta
+                          }))
+                        })
+                      }
+                      className="px-3 py-1 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                    >
+                      Exportar a PDF
+                    </button>
+                  </div>
+                </div>
+                <div className="border border-[#e2e8f0] rounded-xl overflow-x-auto max-h-[220px]">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#f1f5f9] text-[#475569] sticky top-0">
+                      <tr>
+                        <th className="p-2">RUT</th>
+                        <th className="p-2">Nombre Completo</th>
+                        <th className="p-2">Cenco / Establecimiento</th>
+                        <th className="p-2">Planta</th>
+                        <th className="p-2 text-center">Acción</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-[#e2e8f0]">
+                      {listaCoincidencias.map(f => (
+                        <tr key={f.Rut} className="hover:bg-[#f8fafc]">
+                          <td className="p-2 font-bold text-[#016098]">
+                            {f.Rut}-{f.DV}
+                          </td>
+                          <td className="p-2 font-semibold">{`${f.Nombre} ${f.Paterno} ${f.Materno}`.trim()}</td>
+                          <td className="p-2">
+                            {f.CodUnidad} — {f.Establecimiento}
+                          </td>
+                          <td className="p-2">{f.Planta}</td>
+                          <td className="p-2 text-center">
+                            <button
+                              onClick={() => buscarPorFuncionario(f.Rut)}
+                              className="px-3 py-1 bg-[#016098] text-white rounded text-[11px] font-bold"
+                            >
+                              Ver Ficha
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
@@ -612,7 +727,7 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
 
                 {subTabFunc === 'licencias' && (
                   <div className="space-y-3">
-                    <div className="flex justify-between items-center gap-2">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
                       <button
                         type="button"
                         onClick={() => setOrdenDesdeFunc(prev => (prev === 'desc' ? 'asc' : 'desc'))}
@@ -623,36 +738,65 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
                           {ordenDesdeFunc === 'desc' ? 'Más recientes primero ▼' : 'Más antiguas primero ▲'}
                         </span>
                       </button>
-                      <button
-                        onClick={() =>
-                          exportarGenericoExcel(
-                            [...licenciasFunc]
-                              .sort((a, b) =>
-                                ordenDesdeFunc === 'asc'
-                                  ? String(a.Desde || '').localeCompare(String(b.Desde || ''))
-                                  : String(b.Desde || '').localeCompare(String(a.Desde || ''))
-                              )
-                              .map(l => ({
-                              'N° Licencia': l.NumeroLicencia,
-                              'Desde': formatDateDDMMYYYY(l.Desde),
-                              'Hasta': formatDateDDMMYYYY(l.Hasta),
-                              'Días Lic.': l.NumDias,
-                              'Días Aut.': l.DiasAutorizados,
-                              'Modalidad': l.PagoDirecto,
-                              'Tipo Enferm.': l.TipoEnferm,
-                              'Pago Estimado ($)': l.PagoEstimado,
-                              'Monto Pagado ($)': l.MontoPagadoDetalle || l.TotalPagadoTabla,
-                              'Rechazo': l.Rechazo ? 'SI' : 'NO',
-                              'Observación': l.Observacion,
-                              'Obs. Apelación': l.ObserApelacion
-                            })),
-                            `Licencias_Funcionario_${fichaFuncionario.Rut}`
-                          )
-                        }
-                        className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
-                      >
-                        Exportar a Excel
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() =>
+                            exportarGenericoExcel(
+                              [...licenciasFunc]
+                                .sort((a, b) =>
+                                  ordenDesdeFunc === 'asc'
+                                    ? String(a.Desde || '').localeCompare(String(b.Desde || ''))
+                                    : String(b.Desde || '').localeCompare(String(a.Desde || ''))
+                                )
+                                .map(l => ({
+                                'N° Licencia': l.NumeroLicencia,
+                                'Desde': formatDateDDMMYYYY(l.Desde),
+                                'Hasta': formatDateDDMMYYYY(l.Hasta),
+                                'Días Lic.': l.NumDias,
+                                'Días Aut.': l.DiasAutorizados,
+                                'Modalidad': l.PagoDirecto,
+                                'Tipo Enferm.': l.TipoEnferm,
+                                'Pago Estimado ($)': l.PagoEstimado,
+                                'Monto Pagado ($)': l.MontoPagadoDetalle || l.TotalPagadoTabla,
+                                'Rechazo': l.Rechazo ? 'SI' : 'NO',
+                                'Observación': l.Observacion,
+                                'Obs. Apelación': l.ObserApelacion
+                              })),
+                              `Licencias_Funcionario_${fichaFuncionario.Rut}`
+                            )
+                          }
+                          className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                        >
+                          Exportar a Excel
+                        </button>
+                        <button
+                          onClick={() => {
+                            const sorted = [...licenciasFunc].sort((a, b) =>
+                              ordenDesdeFunc === 'asc'
+                                ? String(a.Desde || '').localeCompare(String(b.Desde || ''))
+                                : String(b.Desde || '').localeCompare(String(a.Desde || ''))
+                            );
+                            exportCertificadoLicenciasFuncionarioPDF(
+                              {
+                                rut: fichaFuncionario.Rut,
+                                dv: fichaFuncionario.DV,
+                                nombre: fichaFuncionario.Nombre,
+                                paterno: fichaFuncionario.Paterno,
+                                materno: fichaFuncionario.Materno,
+                                establecimiento: fichaFuncionario.Establecimiento,
+                                planta: fichaFuncionario.Planta,
+                                vigencia: fichaFuncionario.Vigencia || 'S',
+                                fechaInicio: fichaFuncionario.FechaInicio,
+                                fechaTermino: fichaFuncionario.FechaTermino
+                              },
+                              sorted
+                            );
+                          }}
+                          className="px-4 py-1.5 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                        >
+                          Exportar a PDF
+                        </button>
+                      </div>
                     </div>
                     <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[420px]">
                       <table className="w-full text-left text-xs">
@@ -707,33 +851,82 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
 
                 {subTabFunc === 'deuda' && (
                   <div className="space-y-3">
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
                       <span className="text-xs font-bold text-rose-700">
                         CERTIFICADO DE LICENCIAS NO PAGADAS — Total Descuento Calculado: $
                         {noPagadasDeuda
                           .reduce((acc, x) => acc + Number(x.MontoAPagarDescuento || 0), 0)
                           .toLocaleString('es-CL')}
                       </span>
-                      <button
-                        onClick={() =>
-                          exportarGenericoExcel(
-                            noPagadasDeuda.map(d => ({
-                              'N° Licencia': d.NumeroLicencia,
-                              'Desde': formatDateDDMMYYYY(d.Desde),
-                              'Hasta': formatDateDDMMYYYY(d.Hasta),
-                              'Días Lic.': d.NumDias,
-                              'Días Aut.': d.DiasAutorizados,
-                              'Días Descuento': d.DiasDescuento,
-                              'Monto a Pagar / Descuento ($)': d.MontoAPagarDescuento,
-                              'Pago Estimado ($)': d.PagoEstimado
-                            })),
-                            `Certificado_NoPago_${fichaFuncionario.Rut}`
-                          )
-                        }
-                        className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
-                      >
-                        Exportar Certificado No Pago a Excel
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() =>
+                            exportarGenericoExcel(
+                              noPagadasDeuda.map(d => ({
+                                'N° Licencia': d.NumeroLicencia,
+                                'Desde': formatDateDDMMYYYY(d.Desde),
+                                'Hasta': formatDateDDMMYYYY(d.Hasta),
+                                'Días Lic.': d.NumDias,
+                                'Días Aut.': d.DiasAutorizados,
+                                'Días Descuento': d.DiasDescuento,
+                                'Monto a Pagar / Descuento ($)': d.MontoAPagarDescuento,
+                                'Pago Estimado ($)': d.PagoEstimado
+                              })),
+                              `Certificado_NoPago_${fichaFuncionario.Rut}`
+                            )
+                          }
+                          className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                        >
+                          Exportar a Excel
+                        </button>
+                        <button
+                          onClick={() => {
+                            const totDesc = noPagadasDeuda.reduce((acc, x) => acc + Number(x.MontoAPagarDescuento || 0), 0);
+                            const totEst = noPagadasDeuda.reduce((acc, x) => acc + Number(x.PagoEstimado || 0), 0);
+                            const nombreFunc = `${fichaFuncionario.Nombre} ${fichaFuncionario.Paterno} ${fichaFuncionario.Materno}`.trim();
+                            exportToCorporatePDF({
+                              title: 'CERTIFICADO DE LICENCIAS NO PAGADAS / DEUDA FUNCIONARIO',
+                              subtitle: `${nombreFunc} (RUT ${fichaFuncionario.Rut}-${fichaFuncionario.DV}) — ${fichaFuncionario.CodUnidad} ${
+                                fichaFuncionario.Establecimiento || ''
+                              }`,
+                              meta: [
+                                { label: 'Funcionario', value: nombreFunc },
+                                { label: 'RUT', value: `${fichaFuncionario.Rut}-${fichaFuncionario.DV}` }
+                              ],
+                              kpis: [
+                                { label: 'Licencias con Deuda', value: noPagadasDeuda.length, color: 'rose' },
+                                { label: 'Total Descuento Calculado', value: formatCurrencyCLP(totDesc), color: 'rose' },
+                                { label: 'Total Monto Estimado', value: formatCurrencyCLP(totEst), color: 'amber' }
+                              ],
+                              columns: [
+                                { header: 'N° Licencia', key: 'NumeroLicencia' },
+                                { header: 'Desde', key: 'DesdeFmt', align: 'center' },
+                                { header: 'Hasta', key: 'HastaFmt', align: 'center' },
+                                { header: 'Días Lic.', key: 'NumDias', align: 'center' },
+                                { header: 'Días Aut.', key: 'DiasAutorizados', align: 'center' },
+                                { header: 'Días Desc.', key: 'DiasDescuento', align: 'center' },
+                                { header: 'Monto Descuento ($)', key: 'DescFmt', align: 'right' },
+                                { header: 'Monto Estimado ($)', key: 'EstFmt', align: 'right' }
+                              ],
+                              rows: noPagadasDeuda.map(d => ({
+                                ...d,
+                                DesdeFmt: formatDateDDMMYYYY(d.Desde),
+                                HastaFmt: formatDateDDMMYYYY(d.Hasta),
+                                DescFmt: formatCurrencyCLP(d.MontoAPagarDescuento),
+                                EstFmt: formatCurrencyCLP(d.PagoEstimado)
+                              })),
+                              totalsRow: {
+                                NumeroLicencia: 'TOTAL',
+                                DescFmt: formatCurrencyCLP(totDesc),
+                                EstFmt: formatCurrencyCLP(totEst)
+                              }
+                            });
+                          }}
+                          className="px-4 py-1.5 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                        >
+                          Exportar a PDF
+                        </button>
+                      </div>
                     </div>
                     <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[420px]">
                       <table className="w-full text-left text-xs">
@@ -771,35 +964,91 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
                 )}
 
                 {subTabFunc === 'rentas' && (
-                  <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[420px]">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-[#f1f5f9] text-[#475569] sticky top-0">
-                        <tr>
-                          <th className="p-2.5">Año</th>
-                          <th className="p-2.5">Mes</th>
-                          <th className="p-2.5 text-right">Monto Imponible ($)</th>
-                          <th className="p-2.5 text-right">Desc. Previsión ($)</th>
-                          <th className="p-2.5 text-right">Desc. Salud ($)</th>
-                          <th className="p-2.5 text-right">Impuesto Único ($)</th>
-                          <th className="p-2.5 text-right">Monto Neto ($)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#e2e8f0]">
-                        {rentasFunc.map((r, i) => (
-                          <tr key={i} className="hover:bg-[#f8fafc]">
-                            <td className="p-2.5 font-bold">{r.Anio}</td>
-                            <td className="p-2.5 font-semibold">{r.Mes}</td>
-                            <td className="p-2.5 text-right">${Number(r.MontoImponible).toLocaleString('es-CL')}</td>
-                            <td className="p-2.5 text-right">${Number(r.DescPrevision).toLocaleString('es-CL')}</td>
-                            <td className="p-2.5 text-right">${Number(r.DescSalud).toLocaleString('es-CL')}</td>
-                            <td className="p-2.5 text-right">${Number(r.ImpuestoUnico).toLocaleString('es-CL')}</td>
-                            <td className="p-2.5 text-right font-bold text-[#016098]">
-                              ${Number(r.MontoNeto).toLocaleString('es-CL')}
-                            </td>
+                  <div className="space-y-3">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() =>
+                          exportarGenericoExcel(
+                            rentasFunc.map(r => ({
+                              'Año': r.Anio,
+                              'Mes': r.Mes,
+                              'Monto Imponible ($)': r.MontoImponible,
+                              'Desc. Previsión ($)': r.DescPrevision,
+                              'Desc. Salud ($)': r.DescSalud,
+                              'Impuesto Único ($)': r.ImpuestoUnico,
+                              'Monto Neto ($)': r.MontoNeto
+                            })),
+                            `Rentas_Funcionario_${fichaFuncionario.Rut}`
+                          )
+                        }
+                        className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                      >
+                        Exportar a Excel
+                      </button>
+                      <button
+                        onClick={() => {
+                          const nombreFunc = `${fichaFuncionario.Nombre} ${fichaFuncionario.Paterno} ${fichaFuncionario.Materno}`.trim();
+                          exportToCorporatePDF({
+                            title: 'HISTÓRICO DE RENTAS DEL FUNCIONARIO',
+                            subtitle: `${nombreFunc} (RUT ${fichaFuncionario.Rut}-${fichaFuncionario.DV})`,
+                            meta: [
+                              { label: 'Funcionario', value: nombreFunc },
+                              { label: 'RUT', value: `${fichaFuncionario.Rut}-${fichaFuncionario.DV}` }
+                            ],
+                            columns: [
+                              { header: 'Año', key: 'Anio', align: 'center' },
+                              { header: 'Mes', key: 'Mes', align: 'center' },
+                              { header: 'Monto Imponible ($)', key: 'ImpFmt', align: 'right' },
+                              { header: 'Desc. Previsión ($)', key: 'PrevFmt', align: 'right' },
+                              { header: 'Desc. Salud ($)', key: 'SalFmt', align: 'right' },
+                              { header: 'Impuesto Único ($)', key: 'UnicoFmt', align: 'right' },
+                              { header: 'Monto Neto ($)', key: 'NetoFmt', align: 'right' }
+                            ],
+                            rows: rentasFunc.map(r => ({
+                              ...r,
+                              ImpFmt: formatCurrencyCLP(r.MontoImponible),
+                              PrevFmt: formatCurrencyCLP(r.DescPrevision),
+                              SalFmt: formatCurrencyCLP(r.DescSalud),
+                              UnicoFmt: formatCurrencyCLP(r.ImpuestoUnico),
+                              NetoFmt: formatCurrencyCLP(r.MontoNeto)
+                            }))
+                          });
+                        }}
+                        className="px-4 py-1.5 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                      >
+                        Exportar a PDF
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[420px]">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-[#f1f5f9] text-[#475569] sticky top-0">
+                          <tr>
+                            <th className="p-2.5">Año</th>
+                            <th className="p-2.5">Mes</th>
+                            <th className="p-2.5 text-right">Monto Imponible ($)</th>
+                            <th className="p-2.5 text-right">Desc. Previsión ($)</th>
+                            <th className="p-2.5 text-right">Desc. Salud ($)</th>
+                            <th className="p-2.5 text-right">Impuesto Único ($)</th>
+                            <th className="p-2.5 text-right">Monto Neto ($)</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-[#e2e8f0]">
+                          {rentasFunc.map((r, i) => (
+                            <tr key={i} className="hover:bg-[#f8fafc]">
+                              <td className="p-2.5 font-bold">{r.Anio}</td>
+                              <td className="p-2.5 font-semibold">{r.Mes}</td>
+                              <td className="p-2.5 text-right">${Number(r.MontoImponible).toLocaleString('es-CL')}</td>
+                              <td className="p-2.5 text-right">${Number(r.DescPrevision).toLocaleString('es-CL')}</td>
+                              <td className="p-2.5 text-right">${Number(r.DescSalud).toLocaleString('es-CL')}</td>
+                              <td className="p-2.5 text-right">${Number(r.ImpuestoUnico).toLocaleString('es-CL')}</td>
+                              <td className="p-2.5 text-right font-bold text-[#016098]">
+                                ${Number(r.MontoNeto).toLocaleString('es-CL')}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
@@ -843,36 +1092,86 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
             </div>
 
             {registrosDiarias.length > 0 && (
-              <button
-                onClick={() =>
-                  exportarGenericoExcel(
-                    registrosDiarias.map(r => ({
-                      'Fecha Recepción': formatDateDDMMYYYY(r.Recepcion),
-                      'N° Licencia': r.NumeroLicencia,
-                      'RUT': `${r.Rut}-${r.DV}`,
-                      'Nombre': `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
-                      'Cenco': r.CodUnidad,
-                      'Unidad': r.NombreUnidad,
-                      'Planta': r.Planta,
-                      'Desde': formatDateDDMMYYYY(r.Desde),
-                      'Hasta': formatDateDDMMYYYY(r.Hasta),
-                      'Días Lic.': r.NumDias,
-                      'Días Aut.': r.DiasAutorizados,
-                      'Salud': r.Salud,
-                      'Previsión': r.Prevision,
-                      'Modalidad': r.PagoDirecto,
-                      'Tipo Enferm.': r.TipoEnferm,
-                      'Pago Estimado ($)': r.PagoEstimado,
-                      'Médico': r.NombreMedico,
-                      'Observación': r.Observacion
-                    })),
-                    `Licencias_Diarias_${diariasDesde}_${diariasHasta}`
-                  )
-                }
-                className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
-              >
-                Exportar a Excel ({registrosDiarias.length})
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() =>
+                    exportarGenericoExcel(
+                      registrosDiarias.map(r => ({
+                        'Fecha Recepción': formatDateDDMMYYYY(r.Recepcion),
+                        'N° Licencia': r.NumeroLicencia,
+                        'RUT': `${r.Rut}-${r.DV}`,
+                        'Nombre': `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
+                        'Cenco': r.CodUnidad,
+                        'Unidad': r.NombreUnidad,
+                        'Planta': r.Planta,
+                        'Desde': formatDateDDMMYYYY(r.Desde),
+                        'Hasta': formatDateDDMMYYYY(r.Hasta),
+                        'Días Lic.': r.NumDias,
+                        'Días Aut.': r.DiasAutorizados,
+                        'Salud': r.Salud,
+                        'Previsión': r.Prevision,
+                        'Modalidad': r.PagoDirecto,
+                        'Tipo Enferm.': r.TipoEnferm,
+                        'Pago Estimado ($)': r.PagoEstimado,
+                        'Médico': r.NombreMedico,
+                        'Observación': r.Observacion
+                      })),
+                      `Licencias_Diarias_${diariasDesde}_${diariasHasta}`
+                    )
+                  }
+                  className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                >
+                  Exportar a Excel ({registrosDiarias.length})
+                </button>
+                <button
+                  onClick={() => {
+                    const totEst = registrosDiarias.reduce((acc, r) => acc + Number(r.PagoEstimado || 0), 0);
+                    exportToCorporatePDF({
+                      title: 'REPORTE DE RECEPCIÓN DIARIA DE LICENCIAS MÉDICAS',
+                      subtitle: `Período de Recepción: ${formatDateDDMMYYYY(diariasDesde)} al ${formatDateDDMMYYYY(diariasHasta)}`,
+                      meta: [
+                        { label: 'Desde', value: formatDateDDMMYYYY(diariasDesde) },
+                        { label: 'Hasta', value: formatDateDDMMYYYY(diariasHasta) }
+                      ],
+                      kpis: [
+                        { label: 'Licencias Recepcionadas', value: registrosDiarias.length, color: 'blue' },
+                        { label: 'Total Pago Estimado', value: formatCurrencyCLP(totEst), color: 'indigo' }
+                      ],
+                      columns: [
+                        { header: 'Recepción', key: 'RecepFmt', align: 'center' },
+                        { header: 'N° Licencia', key: 'NumeroLicencia' },
+                        { header: 'RUT', key: 'RutFmt' },
+                        { header: 'Funcionario', key: 'NombreFmt' },
+                        { header: 'Cenco / Planta', key: 'CencoFmt' },
+                        { header: 'Desde / Hasta', key: 'PeriodoFmt', align: 'center' },
+                        { header: 'Días', key: 'NumDias', align: 'center' },
+                        { header: 'Salud / AFP', key: 'SaludFmt' },
+                        { header: 'Modalidad', key: 'PagoDirecto' },
+                        { header: 'Pago Estimado', key: 'EstimadoFmt', align: 'right' }
+                      ],
+                      rows: registrosDiarias.map(r => ({
+                        RecepFmt: formatDateDDMMYYYY(r.Recepcion),
+                        NumeroLicencia: r.NumeroLicencia,
+                        RutFmt: `${r.Rut}-${r.DV}`,
+                        NombreFmt: `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
+                        CencoFmt: `${r.CodUnidad} — ${r.Planta}`,
+                        PeriodoFmt: `${formatDateDDMMYYYY(r.Desde)} al ${formatDateDDMMYYYY(r.Hasta)}`,
+                        NumDias: r.NumDias,
+                        SaludFmt: `${r.Salud || ''} / ${r.Prevision || ''}`,
+                        PagoDirecto: r.PagoDirecto,
+                        EstimadoFmt: formatCurrencyCLP(r.PagoEstimado)
+                      })),
+                      totalsRow: {
+                        RecepFmt: 'TOTAL',
+                        EstimadoFmt: formatCurrencyCLP(totEst)
+                      }
+                    });
+                  }}
+                  className="px-4 py-2 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                >
+                  Exportar a PDF
+                </button>
+              </div>
             )}
           </div>
 
@@ -961,30 +1260,69 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
             </div>
 
             {registrosBrp.length > 0 && (
-              <button
-                onClick={() =>
-                  exportarGenericoExcel(
-                    registrosBrp.map(r => ({
-                      'RUT': `${r.Rut}-${r.DV}`,
-                      'Nombre': `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
-                      'Cenco': r.CodUnidad,
-                      'Planta': r.Planta,
-                      'N° Licencia': r.NumeroLicencia,
-                      'Desde': formatDateDDMMYYYY(r.Desde),
-                      'Hasta': formatDateDDMMYYYY(r.Hasta),
-                      'Días Lic.': r.NumDias,
-                      'Días Aut.': r.DiasAutorizados,
-                      'Salud': r.Salud,
-                      'Pago Estimado ($)': r.PagoEstimado,
-                      'Observación': r.Observacion
-                    })),
-                    `Licencias_BRP_${brpMes}_${brpAnio}`
-                  )
-                }
-                className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
-              >
-                Exportar BRP a Excel ({registrosBrp.length})
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() =>
+                    exportarGenericoExcel(
+                      registrosBrp.map(r => ({
+                        'RUT': `${r.Rut}-${r.DV}`,
+                        'Nombre': `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
+                        'Cenco': r.CodUnidad,
+                        'Planta': r.Planta,
+                        'N° Licencia': r.NumeroLicencia,
+                        'Desde': formatDateDDMMYYYY(r.Desde),
+                        'Hasta': formatDateDDMMYYYY(r.Hasta),
+                        'Días Lic.': r.NumDias,
+                        'Días Aut.': r.DiasAutorizados,
+                        'Salud': r.Salud,
+                        'Pago Estimado ($)': r.PagoEstimado,
+                        'Observación': r.Observacion
+                      })),
+                      `Licencias_BRP_${brpMes}_${brpAnio}`
+                    )
+                  }
+                  className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                >
+                  Exportar BRP a Excel ({registrosBrp.length})
+                </button>
+                <button
+                  onClick={() => {
+                    const totEst = registrosBrp.reduce((acc, r) => acc + Number(r.PagoEstimado || 0), 0);
+                    exportToCorporatePDF({
+                      title: `INFORME DE LICENCIAS MÉDICAS BRP — MES ${brpMes} / ${brpAnio}`,
+                      meta: [
+                        { label: 'Mes / Año', value: `${brpMes}/${brpAnio}` }
+                      ],
+                      columns: [
+                        { header: 'RUT', key: 'RutFmt' },
+                        { header: 'Funcionario', key: 'NombreFmt' },
+                        { header: 'Cenco', key: 'CodUnidad', align: 'center' },
+                        { header: 'N° Licencia', key: 'NumeroLicencia' },
+                        { header: 'Desde', key: 'DesdeFmt', align: 'center' },
+                        { header: 'Hasta', key: 'HastaFmt', align: 'center' },
+                        { header: 'Días', key: 'NumDias', align: 'center' },
+                        { header: 'Salud', key: 'Salud' },
+                        { header: 'Pago Estimado', key: 'EstimadoFmt', align: 'right' }
+                      ],
+                      rows: registrosBrp.map(r => ({
+                        ...r,
+                        RutFmt: `${r.Rut}-${r.DV}`,
+                        NombreFmt: `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
+                        DesdeFmt: formatDateDDMMYYYY(r.Desde),
+                        HastaFmt: formatDateDDMMYYYY(r.Hasta),
+                        EstimadoFmt: formatCurrencyCLP(r.PagoEstimado)
+                      })),
+                      totalsRow: {
+                        RutFmt: 'TOTAL',
+                        EstimadoFmt: formatCurrencyCLP(totEst)
+                      }
+                    });
+                  }}
+                  className="px-4 py-2 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                >
+                  Exportar a PDF
+                </button>
+              </div>
             )}
           </div>
 
@@ -1065,30 +1403,77 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
             </div>
 
             {registrosPD.length > 0 && (
-              <button
-                onClick={() =>
-                  exportarGenericoExcel(
-                    registrosPD.map(r => ({
-                      'RUT': `${r.Rut}-${r.DV}`,
-                      'Nombre': `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
-                      'Cenco': r.CodUnidad,
-                      'Planta': r.Planta,
-                      'N° Licencia': r.NumeroLicencia,
-                      'Desde': formatDateDDMMYYYY(r.Desde),
-                      'Hasta': formatDateDDMMYYYY(r.Hasta),
-                      'Días Lic.': r.NumDias,
-                      'Días Pagados': r.NumDiasPagados,
-                      'Salud': r.Salud,
-                      'Pago Estimado ($)': r.PagoEstimado,
-                      'Total Pagado ($)': r.TotalPagado
-                    })),
-                    `Licencias_PagoDirecto_${pdMes}_${pdAnio}`
-                  )
-                }
-                className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
-              >
-                Exportar a Excel ({registrosPD.length})
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() =>
+                    exportarGenericoExcel(
+                      registrosPD.map(r => ({
+                        'RUT': `${r.Rut}-${r.DV}`,
+                        'Nombre': `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
+                        'Cenco': r.CodUnidad,
+                        'Planta': r.Planta,
+                        'N° Licencia': r.NumeroLicencia,
+                        'Desde': formatDateDDMMYYYY(r.Desde),
+                        'Hasta': formatDateDDMMYYYY(r.Hasta),
+                        'Días Lic.': r.NumDias,
+                        'Días Pagados': r.NumDiasPagados,
+                        'Salud': r.Salud,
+                        'Pago Estimado ($)': r.PagoEstimado,
+                        'Total Pagado ($)': r.TotalPagado
+                      })),
+                      `Licencias_PagoDirecto_${pdMes}_${pdAnio}`
+                    )
+                  }
+                  className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                >
+                  Exportar a Excel ({registrosPD.length})
+                </button>
+                <button
+                  onClick={() => {
+                    const totEst = registrosPD.reduce((acc, r) => acc + Number(r.PagoEstimado || 0), 0);
+                    const totPag = registrosPD.reduce((acc, r) => acc + Number(r.TotalPagado || 0), 0);
+                    exportToCorporatePDF({
+                      title: `INFORME MENSUAL LICENCIAS PAGO DIRECTO — MES ${pdMes} / ${pdAnio}`,
+                      meta: [{ label: 'Mes / Año', value: `${pdMes}/${pdAnio}` }],
+                      kpis: [
+                        { label: 'Licencias Pago Directo', value: registrosPD.length, color: 'blue' },
+                        { label: 'Total Pago Estimado', value: formatCurrencyCLP(totEst), color: 'indigo' },
+                        { label: 'Total Pagado', value: formatCurrencyCLP(totPag), color: 'emerald' }
+                      ],
+                      columns: [
+                        { header: 'RUT', key: 'RutFmt' },
+                        { header: 'Funcionario', key: 'NombreFmt' },
+                        { header: 'Cenco / Planta', key: 'CencoFmt' },
+                        { header: 'N° Licencia', key: 'NumeroLicencia' },
+                        { header: 'Desde', key: 'DesdeFmt', align: 'center' },
+                        { header: 'Hasta', key: 'HastaFmt', align: 'center' },
+                        { header: 'Días Lic.', key: 'NumDias', align: 'center' },
+                        { header: 'Pago Estimado', key: 'EstimadoFmt', align: 'right' },
+                        { header: 'Total Pagado', key: 'PagadoFmt', align: 'right' }
+                      ],
+                      rows: registrosPD.map(r => ({
+                        RutFmt: `${r.Rut}-${r.DV}`,
+                        NombreFmt: `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
+                        CencoFmt: `${r.CodUnidad} — ${r.Planta}`,
+                        NumeroLicencia: r.NumeroLicencia,
+                        DesdeFmt: formatDateDDMMYYYY(r.Desde),
+                        HastaFmt: formatDateDDMMYYYY(r.Hasta),
+                        NumDias: r.NumDias,
+                        EstimadoFmt: formatCurrencyCLP(r.PagoEstimado),
+                        PagadoFmt: formatCurrencyCLP(r.TotalPagado)
+                      })),
+                      totalsRow: {
+                        RutFmt: 'TOTAL',
+                        EstimadoFmt: formatCurrencyCLP(totEst),
+                        PagadoFmt: formatCurrencyCLP(totPag)
+                      }
+                    });
+                  }}
+                  className="px-4 py-2 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                >
+                  Exportar a PDF
+                </button>
+              </div>
             )}
           </div>
 
@@ -1183,34 +1568,86 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
             </div>
 
             {registrosGeneral.length > 0 && (
-              <button
-                onClick={() =>
-                  exportarGenericoExcel(
-                    registrosGeneral.map(r => ({
-                      'N° Licencia': r.NumeroLicencia,
-                      'RUT': `${r.Rut}-${r.DV}`,
-                      'Nombre': `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
-                      'Cenco': r.CodUnidad,
-                      'Desde': formatDateDDMMYYYY(r.Desde),
-                      'Hasta': formatDateDDMMYYYY(r.Hasta),
-                      'Días Lic.': r.NumDias,
-                      'Días Pagados': r.DiasPagados,
-                      'Salud': r.Salud,
-                      'Previsión': r.Prevision,
-                      'Modalidad': r.PagoDirecto,
-                      'Tipo Enferm.': r.TipoEnferm,
-                      'Pago Estimado ($)': r.PagoEstimado,
-                      'Monto Pagado ($)': r.MontoPagado,
-                      'N° Documento': r.NumeroDocumento,
-                      'Concepto': r.Concepto
-                    })),
-                    `Informe_Anual_${genTipo}_${genAnio}`
-                  )
-                }
-                className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
-              >
-                Exportar a Excel ({registrosGeneral.length})
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() =>
+                    exportarGenericoExcel(
+                      registrosGeneral.map(r => ({
+                        'N° Licencia': r.NumeroLicencia,
+                        'RUT': `${r.Rut}-${r.DV}`,
+                        'Nombre': `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
+                        'Cenco': r.CodUnidad,
+                        'Desde': formatDateDDMMYYYY(r.Desde),
+                        'Hasta': formatDateDDMMYYYY(r.Hasta),
+                        'Días Lic.': r.NumDias,
+                        'Días Pagados': r.DiasPagados,
+                        'Salud': r.Salud,
+                        'Previsión': r.Prevision,
+                        'Modalidad': r.PagoDirecto,
+                        'Tipo Enferm.': r.TipoEnferm,
+                        'Pago Estimado ($)': r.PagoEstimado,
+                        'Monto Pagado ($)': r.MontoPagado,
+                        'N° Transferencia / Doc.': r.NumeroDocumento,
+                        'Concepto': r.Concepto
+                      })),
+                      `Informe_Anual_${genTipo}_${genAnio}`
+                    )
+                  }
+                  className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                >
+                  Exportar a Excel ({registrosGeneral.length})
+                </button>
+                <button
+                  onClick={() => {
+                    const totEst = registrosGeneral.reduce((acc, r) => acc + Number(r.PagoEstimado || 0), 0);
+                    const totPag = registrosGeneral.reduce((acc, r) => acc + Number(r.MontoPagado || 0), 0);
+                    exportToCorporatePDF({
+                      title: `INFORME ANUAL DE LICENCIAS MÉDICAS (${genTipo.toUpperCase()}) — AÑO ${genAnio}`,
+                      meta: [
+                        { label: 'Año', value: genAnio },
+                        { label: 'Filtro', value: genTipo }
+                      ],
+                      kpis: [
+                        { label: 'Total Registros', value: registrosGeneral.length.toLocaleString('es-CL'), color: 'blue' },
+                        { label: 'Total Pago Estimado', value: formatCurrencyCLP(totEst), color: 'indigo' },
+                        { label: 'Total Monto Pagado', value: formatCurrencyCLP(totPag), color: 'emerald' }
+                      ],
+                      columns: [
+                        { header: 'N° Licencia', key: 'NumeroLicencia' },
+                        { header: 'RUT', key: 'RutFmt' },
+                        { header: 'Funcionario', key: 'NombreFmt' },
+                        { header: 'Cenco', key: 'CodUnidad', align: 'center' },
+                        { header: 'Desde / Hasta', key: 'PeriodoFmt', align: 'center' },
+                        { header: 'Días Lic/Pag', key: 'DiasFmt', align: 'center' },
+                        { header: 'Salud', key: 'Salud' },
+                        { header: 'Pago Estimado', key: 'EstimadoFmt', align: 'right' },
+                        { header: 'Monto Pagado', key: 'PagadoFmt', align: 'right' },
+                        { header: 'N° Transf.', key: 'DocFmt' }
+                      ],
+                      rows: registrosGeneral.slice(0, 1000).map(r => ({
+                        NumeroLicencia: r.NumeroLicencia,
+                        RutFmt: `${r.Rut}-${r.DV}`,
+                        NombreFmt: `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
+                        CodUnidad: r.CodUnidad,
+                        PeriodoFmt: `${formatDateDDMMYYYY(r.Desde)} al ${formatDateDDMMYYYY(r.Hasta)}`,
+                        DiasFmt: `${r.NumDias} / ${r.DiasPagados}`,
+                        Salud: r.Salud,
+                        EstimadoFmt: formatCurrencyCLP(r.PagoEstimado),
+                        PagadoFmt: formatCurrencyCLP(r.MontoPagado),
+                        DocFmt: r.NumeroDocumento || '-'
+                      })),
+                      totalsRow: {
+                        NumeroLicencia: 'TOTAL',
+                        EstimadoFmt: formatCurrencyCLP(totEst),
+                        PagadoFmt: formatCurrencyCLP(totPag)
+                      }
+                    });
+                  }}
+                  className="px-4 py-2 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                >
+                  Exportar a PDF
+                </button>
+              </div>
             )}
           </div>
 
@@ -1316,37 +1753,67 @@ export default function InformesLegacy({ tabInicial = 'por-funcionario' }: Infor
             </div>
 
             {registrosSoftland.length > 0 && (
-              <button
-                onClick={() =>
-                  exportarGenericoExcel(
-                    registrosSoftland.map(r => ({
-                      'Centro Costo (CCosto)': r.CCosto,
-                      'Establecimiento': r.Establecimiento,
-                      'RUT': `${r.Rut}-${r.DV}`,
-                      'Nombre': `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
-                      'N° Licencia': r.NumeroLicencia,
-                      'Días Lic.': r.NumDias,
-                      'Desde': formatDateDDMMYYYY(r.Desde),
-                      'Hasta': formatDateDDMMYYYY(r.Hasta),
-                      ...(softTipo === 'pagos'
-                        ? {
-                            'Fecha Depósito': formatDateDDMMYYYY(r.FechaDeposito),
-                            'Monto Pagado ($)': r.TotalPagado,
-                            'N° Documento': r.NumeroDocumento,
-                            'Banco': r.Banco
-                          }
-                        : {
-                            'Pago Estimado ($)': r.PagoEstimado
-                          }),
-                      'Observación': r.Observacion
-                    })),
-                    `Captura_Softland_${softTipo}_${softSector}_${softDesde}_${softHasta}`
-                  )
-                }
-                className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
-              >
-                Exportar Softland a Excel ({registrosSoftland.length})
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() =>
+                    exportarGenericoExcel(
+                      registrosSoftland.map(r => ({
+                        'Centro Costo (CCosto)': r.CCosto,
+                        'Establecimiento': r.Establecimiento,
+                        'RUT': `${r.Rut}-${r.DV}`,
+                        'Nombre': `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
+                        'N° Licencia': r.NumeroLicencia,
+                        'Días Lic.': r.NumDias,
+                        'Desde': formatDateDDMMYYYY(r.Desde),
+                        'Hasta': formatDateDDMMYYYY(r.Hasta),
+                        ...(softTipo === 'pagos'
+                          ? {
+                              'Fecha Depósito': formatDateDDMMYYYY(r.FechaDeposito),
+                              'Monto Pagado ($)': r.TotalPagado,
+                              'N° Transferencia': r.NumeroDocumento,
+                              'Banco': r.Banco
+                            }
+                          : {
+                              'Pago Estimado ($)': r.PagoEstimado
+                            }),
+                        'Observación': r.Observacion
+                      })),
+                      `Captura_Softland_${softTipo}_${softSector}_${softDesde}_${softHasta}`
+                    )
+                  }
+                  className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700"
+                >
+                  Exportar Softland a Excel ({registrosSoftland.length})
+                </button>
+                <button
+                  onClick={() => {
+                    exportToCorporatePDF({
+                      title: `REPORTE CAPTURA SOFTLAND (${softTipo.toUpperCase()}) — SECTOR ${softSector.toUpperCase()}`,
+                      subtitle: `Período: ${formatDateDDMMYYYY(softDesde)} al ${formatDateDDMMYYYY(softHasta)}`,
+                      columns: [
+                        { header: 'CCosto', key: 'CCosto', align: 'center' },
+                        { header: 'Establecimiento', key: 'Establecimiento' },
+                        { header: 'RUT', key: 'RutFmt' },
+                        { header: 'Funcionario', key: 'NombreFmt' },
+                        { header: 'N° Licencia', key: 'NumeroLicencia' },
+                        { header: 'Días', key: 'NumDias', align: 'center' },
+                        { header: 'Desde / Hasta', key: 'PeriodoFmt', align: 'center' },
+                        { header: softTipo === 'pagos' ? 'Monto Pagado' : 'Pago Estimado', key: 'MontoFmt', align: 'right' }
+                      ],
+                      rows: registrosSoftland.map(r => ({
+                        ...r,
+                        RutFmt: `${r.Rut}-${r.DV}`,
+                        NombreFmt: `${r.Nombre} ${r.Paterno} ${r.Materno}`.trim(),
+                        PeriodoFmt: `${formatDateDDMMYYYY(r.Desde)} al ${formatDateDDMMYYYY(r.Hasta)}`,
+                        MontoFmt: formatCurrencyCLP(softTipo === 'pagos' ? r.TotalPagado : r.PagoEstimado)
+                      }))
+                    });
+                  }}
+                  className="px-4 py-2 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
+                >
+                  Exportar a PDF
+                </button>
+              </div>
             )}
           </div>
 

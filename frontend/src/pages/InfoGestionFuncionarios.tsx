@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
+import { exportToCorporatePDF } from '../utils/exportUtils';
 
 interface FuncionarioStat {
   Rut: number;
@@ -230,7 +231,49 @@ export default function InfoGestionFuncionarios() {
           className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md transition font-medium flex items-center gap-2 disabled:opacity-50 ml-auto"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-          Exportar
+          Exportar Excel
+        </button>
+        <button
+          onClick={() => {
+            if (data.length === 0) return;
+            const totDias = data.reduce((a, x) => a + Number(x.Total_Dias || 0), 0);
+            exportToCorporatePDF({
+              title: 'INFORME DE GESTIÓN — LICENCIAS MÉDICAS POR FUNCIONARIO',
+              subtitle: `Período: ${formatDate(fechaDesde)} al ${formatDate(fechaHasta)} — Mínimo ${minDias} días`,
+              meta: [
+                { label: 'Período', value: `${formatDate(fechaDesde)} al ${formatDate(fechaHasta)}` },
+                { label: 'Días Mínimos', value: minDias }
+              ],
+              kpis: [
+                { label: 'Funcionarios', value: data.length, color: 'blue' },
+                { label: 'Total Días Reposo', value: totDias.toLocaleString('es-CL'), color: 'indigo' },
+                { label: 'Con Lic. Vigente', value: data.filter(x => x.Tiene_Vigente).length, color: 'emerald' }
+              ],
+              columns: [
+                { header: 'RUT', key: 'RutFmt' },
+                { header: 'Nombres', key: 'Nombre' },
+                { header: 'Apellidos', key: 'ApellidosFmt' },
+                { header: 'Sector', key: 'NOMBRE_SUCURSAL' },
+                { header: 'Unidad', key: 'NOMBRE_UNIDAD' },
+                { header: 'Total Días', key: 'Total_Dias', align: 'center' },
+                { header: 'Lic. Vigente', key: 'VigenteFmt', align: 'center' }
+              ],
+              rows: data.map(item => ({
+                ...item,
+                RutFmt: `${item.Rut}-${item.Dv}`,
+                ApellidosFmt: `${item.Apellido_Paterno} ${item.Apellido_Materno}`,
+                VigenteFmt: item.Tiene_Vigente ? 'SÍ' : 'NO'
+              })),
+              totalsRow: {
+                RutFmt: 'TOTAL',
+                Total_Dias: totDias
+              }
+            });
+          }}
+          disabled={data.length === 0}
+          className="bg-[#016098] hover:bg-[#014d7a] text-white px-4 py-2 rounded-md transition font-medium flex items-center gap-2 disabled:opacity-50"
+        >
+          Exportar PDF
         </button>
       </div>
 
@@ -302,12 +345,43 @@ export default function InfoGestionFuncionarios() {
           <div className="p-4 bg-gray-50 border-b font-bold text-gray-700 flex justify-between items-center">
             <span>Detalle de Licencias {selectedRut ? `(RUT: ${selectedRut})` : ''}</span>
             {detalles.length > 0 && (
-              <button 
-                onClick={exportDetalleToExcel}
-                className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded transition flex items-center gap-1"
-              >
-                Excel Detalle
-              </button>
+              <div className="flex gap-1.5">
+                <button 
+                  onClick={exportDetalleToExcel}
+                  className="text-xs bg-green-600 hover:bg-green-700 text-white px-2.5 py-1 rounded transition flex items-center gap-1"
+                >
+                  Excel Detalle
+                </button>
+                <button
+                  onClick={() => {
+                    const f0 = detalles[0];
+                    exportToCorporatePDF({
+                      title: `DETALLE DE LICENCIAS MÉDICAS DEL FUNCIONARIO (RUT ${selectedRut})`,
+                      subtitle: f0 ? `${f0.Nombre} ${f0.Apellidos} — Cenco ${f0.Cenco}` : '',
+                      columns: [
+                        { header: 'RUT', key: 'Rut' },
+                        { header: 'Funcionario', key: 'FuncFmt' },
+                        { header: 'Cenco', key: 'Cenco', align: 'center' },
+                        { header: 'Recepción', key: 'RecepFmt', align: 'center' },
+                        { header: 'N° Licencia', key: 'NumeroLicencia' },
+                        { header: 'Desde', key: 'DesdeFmt', align: 'center' },
+                        { header: 'Hasta', key: 'HastaFmt', align: 'center' },
+                        { header: 'Observación', key: 'Observacion' }
+                      ],
+                      rows: detalles.map(det => ({
+                        ...det,
+                        FuncFmt: `${det.Nombre} ${det.Apellidos}`,
+                        RecepFmt: formatDate(det.Fecha_Recepcion),
+                        DesdeFmt: formatDate(det.Desde),
+                        HastaFmt: formatDate(det.Hasta)
+                      }))
+                    });
+                  }}
+                  className="text-xs bg-[#016098] hover:bg-[#014d7a] text-white px-2.5 py-1 rounded transition"
+                >
+                  PDF Detalle
+                </button>
+              </div>
             )}
           </div>
           <div className="overflow-x-auto flex-1 max-h-[600px] overflow-y-auto">

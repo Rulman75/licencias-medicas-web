@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import * as XLSX from 'xlsx';
+import { exportToExcel, exportToCorporatePDF, formatCurrencyCLP } from '../utils/exportUtils';
 
 export default function MantencionPagos() {
   const todayStr = new Date().toISOString().split('T')[0];
@@ -10,14 +10,14 @@ export default function MantencionPagos() {
   // Lista de Bancos
   const [bancos, setBancos] = useState<string[]>([]);
 
-  // Panel 1: Estado de Cheque / Documento (DETALLE_CHEQUES)
+  // Panel 1: Estado de Transferencia / Documento Bancario
   const [bancoCheque, setBancoCheque] = useState('');
   const [numCheque, setNumCheque] = useState('');
   const [montoCheque, setMontoCheque] = useState<string>('0');
   const [saldoCheque, setSaldoCheque] = useState<number>(0);
   const [cantDocsCheque, setCantDocsCheque] = useState<number>(0);
   const [fechaCheque, setFechaCheque] = useState(todayStr);
-  const [tipoCheque, setTipoCheque] = useState('Cheque'); // Cheque | V. Vista
+  const [tipoCheque, setTipoCheque] = useState('Transferencia'); // Transferencia | Depósito | V. Vista
   const [areaCheque, setAreaCheque] = useState('Educacion'); // Educacion | Salud
   const [estadoCheque, setEstadoCheque] = useState('Abierto'); // Abierto | Cerrado
   const [chequeEncontrado, setChequeEncontrado] = useState(false);
@@ -111,12 +111,12 @@ export default function MantencionPagos() {
     }
   };
 
-  // Consultar Cheque en DETALLE_CHEQUES
+  // Consultar Transferencia / Documento
   const buscarCheque = async (bancoParam?: string, numParam?: string) => {
     const b = (bancoParam !== undefined ? bancoParam : bancoCheque).trim();
     const n = (numParam !== undefined ? numParam : numCheque).trim();
     if (!b || !n) {
-      mostrarAlerta('error', 'Seleccione un Banco e ingrese el N° de Cheque/Documento');
+      mostrarAlerta('error', 'Seleccione un Banco e ingrese el N° de Transferencia/Documento');
       return;
     }
     setCargando(true);
@@ -136,26 +136,28 @@ export default function MantencionPagos() {
           setMontoCheque(String(data.cheque.Monto || 0));
           setFechaCheque(data.cheque.Fecha || todayStr);
           setFechaDocPago(data.cheque.Fecha || todayStr);
-          setTipoCheque(data.cheque.Tipo || 'Cheque');
+          const tipoRaw = String(data.cheque.Tipo || '').trim();
+          setTipoCheque(!tipoRaw || tipoRaw === 'Cheque' ? 'Transferencia' : tipoRaw);
           setAreaCheque(data.cheque.Area || 'Educacion');
           setEstadoCheque(data.cheque.Estado || 'Abierto');
-          mostrarAlerta('info', `Cheque #${n} (${b}) cargado — Estado: ${data.cheque.Estado}`);
+          mostrarAlerta('info', `Transferencia #${n} (${b}) cargada — Estado: ${data.cheque.Estado}`);
         } else {
           setChequeEncontrado(false);
-          mostrarAlerta('info', `Documento #${n} no registrado aún en DETALLE_CHEQUES. Puede registrarlo ahora.`);
+          setTipoCheque('Transferencia');
+          mostrarAlerta('info', `Transferencia #${n} no registrada aún. Puede registrarla ahora.`);
         }
       }
     } catch {
-      mostrarAlerta('error', 'Error consultando cheque');
+      mostrarAlerta('error', 'Error consultando transferencia');
     } finally {
       setCargando(false);
     }
   };
 
-  // Guardar o Modificar Cheque
+  // Guardar o Modificar Transferencia
   const guardarCheque = async () => {
     if (!bancoCheque.trim() || !numCheque.trim()) {
-      mostrarAlerta('error', 'Banco y N° de Cheque son obligatorios');
+      mostrarAlerta('error', 'Banco y N° de Transferencia son obligatorios');
       return;
     }
     setCargando(true);
@@ -182,10 +184,10 @@ export default function MantencionPagos() {
         setNumDocPago(numCheque.trim());
         setFechaDocPago(fechaCheque);
       } else {
-        mostrarAlerta('error', data.error || 'Error guardando cheque');
+        mostrarAlerta('error', data.error || 'Error guardando transferencia');
       }
     } catch {
-      mostrarAlerta('error', 'Error de conexión guardando cheque');
+      mostrarAlerta('error', 'Error de conexión guardando transferencia');
     } finally {
       setCargando(false);
     }
@@ -197,7 +199,7 @@ export default function MantencionPagos() {
     setSaldoCheque(0);
     setCantDocsCheque(0);
     setFechaCheque(todayStr);
-    setTipoCheque('Cheque');
+    setTipoCheque('Transferencia');
     setAreaCheque('Educacion');
     setEstadoCheque('Abierto');
     setChequeEncontrado(false);
@@ -354,7 +356,7 @@ export default function MantencionPagos() {
       return;
     }
     if (!numDocPago.trim()) {
-      mostrarAlerta('error', 'Ingrese el Número de Documento / Cheque');
+      mostrarAlerta('error', 'Ingrese el Número de Transferencia / Documento');
       return;
     }
     if (diasPagados === '' || montoPago === '') {
@@ -435,7 +437,7 @@ export default function MantencionPagos() {
       mostrarAlerta('error', 'Seleccione un pago de la tabla para eliminarlo');
       return;
     }
-    if (!window.confirm('¿Está seguro de eliminar este registro de pago? Se descontará del total pagado y del saldo del cheque.')) {
+    if (!window.confirm('¿Está seguro de eliminar este registro de pago? Se descontará del total pagado y del saldo de la transferencia.')) {
       return;
     }
     setCargando(true);
@@ -463,25 +465,66 @@ export default function MantencionPagos() {
 
   const exportarMovimientosChequeExcel = () => {
     if (movimientosCheque.length === 0) return;
-    const rows = movimientosCheque.map(m => ({
-      'Correlativo': m.Correlativo,
-      'Banco': m.Banco,
-      'N° Documento': m.NumeroDocumento,
-      'N° Licencia': m.NumeroLicencia,
-      'Concepto': m.Concepto,
-      'Días Pagados': m.DiasPagados,
-      'Monto ($)': m.Monto,
-      'Fecha Doc.': formatDateDDMMYYYY(m.FechaDepCtaCte),
-      'Recepción': formatDateDDMMYYYY(m.Recepcion),
-      'Desde': formatDateDDMMYYYY(m.Desde),
-      'Hasta': formatDateDDMMYYYY(m.Hasta),
-      'Cenco': m.Cenco,
-      'Observación': m.Observacion
-    }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Pagos_Cheque');
-    XLSX.writeFile(wb, `Cheque_${bancoCheque}_${numCheque}.xlsx`);
+    exportToExcel(
+      movimientosCheque.map(m => ({
+        'Correlativo': m.Correlativo,
+        'Banco': m.Banco,
+        'N° Transferencia': m.NumeroDocumento,
+        'N° Licencia': m.NumeroLicencia,
+        'Concepto': m.Concepto,
+        'Días Pagados': m.DiasPagados,
+        'Monto ($)': m.Monto,
+        'Fecha Doc.': formatDateDDMMYYYY(m.FechaDepCtaCte),
+        'Recepción': formatDateDDMMYYYY(m.Recepcion),
+        'Desde': formatDateDDMMYYYY(m.Desde),
+        'Hasta': formatDateDDMMYYYY(m.Hasta),
+        'Cenco': m.Cenco,
+        'Observación': m.Observacion
+      })),
+      `Transferencia_${bancoCheque}_${numCheque}`,
+      'Pagos_Transferencia'
+    );
+  };
+
+  const exportarMovimientosChequePDF = () => {
+    if (movimientosCheque.length === 0) return;
+    const totalMonto = movimientosCheque.reduce((acc, m) => acc + Number(m.Monto || 0), 0);
+    exportToCorporatePDF({
+      title: `DETALLE DE PAGOS IMPUTADOS A TRANSFERENCIA #${numCheque}`,
+      subtitle: `Control de Transferencias Bancarias y Movimientos Imputados`,
+      meta: [
+        { label: 'Banco', value: bancoCheque },
+        { label: 'N° Transferencia', value: numCheque },
+        { label: 'Tipo / Estado', value: `${tipoCheque} (${estadoCheque})` }
+      ],
+      kpis: [
+        { label: 'Monto Transferencia', value: formatCurrencyCLP(montoCheque), color: 'blue' },
+        { label: 'Monto Ocupado', value: formatCurrencyCLP(saldoCheque), color: 'indigo' },
+        { label: 'Saldo Disponible', value: formatCurrencyCLP((parseInt(montoCheque || '0', 10) || 0) - saldoCheque), color: 'emerald' },
+        { label: 'Movimientos', value: movimientosCheque.length, color: 'slate' }
+      ],
+      columns: [
+        { header: 'ID', key: 'Correlativo', align: 'center' },
+        { header: 'N° Licencia', key: 'NumeroLicencia' },
+        { header: 'Concepto', key: 'Concepto' },
+        { header: 'Días', key: 'DiasPagados', align: 'center' },
+        { header: 'Monto ($)', key: 'MontoFmt', align: 'right' },
+        { header: 'Desde', key: 'DesdeFmt', align: 'center' },
+        { header: 'Hasta', key: 'HastaFmt', align: 'center' },
+        { header: 'Cenco', key: 'Cenco', align: 'center' },
+        { header: 'Observación', key: 'Observacion' }
+      ],
+      rows: movimientosCheque.map(m => ({
+        ...m,
+        MontoFmt: formatCurrencyCLP(m.Monto),
+        DesdeFmt: formatDateDDMMYYYY(m.Desde),
+        HastaFmt: formatDateDDMMYYYY(m.Hasta)
+      })),
+      totalsRow: {
+        Correlativo: 'TOTAL',
+        MontoFmt: formatCurrencyCLP(totalMonto)
+      }
+    });
   };
 
   const diferenciaCheque = (parseInt(montoCheque || '0', 10) || 0) - saldoCheque;
@@ -492,10 +535,10 @@ export default function MantencionPagos() {
       <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-[#016098]">
-            Mantención Operativa — Ingreso de Pagos y Gestión de Cheques
+            Mantención Operativa — Ingreso de Pagos y Gestión de Transferencias
           </h1>
           <p className="text-xs text-[#64748b] mt-1">
-            Control de cheques/documentos bancarios (`DETALLE_CHEQUES`) e imputación de pagos por licencia médica (`LIC_DETALLE_PAGO_ACTUAL`)
+            Control de transferencias/documentos bancarios e imputación de pagos por licencia médica (`LIC_DETALLE_PAGO_ACTUAL`)
           </p>
         </div>
       </div>
@@ -518,11 +561,11 @@ export default function MantencionPagos() {
         </div>
       )}
 
-      {/* PANEL 1: GESTIÓN DE CHEQUE / DOCUMENTO BANCARIO */}
+      {/* PANEL 1: GESTIÓN DE TRANSFERENCIA / DOCUMENTO BANCARIO */}
       <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-[#f1f5f9] pb-2 gap-2">
           <h2 className="text-sm font-bold text-[#016098] uppercase tracking-wider">
-            1. Control de Cheque / Documento Bancario (`DETALLE_CHEQUES`)
+            1. Control de Transferencia / Documento Bancario
           </h2>
           <div className="flex items-center gap-2">
             {chequeEncontrado && (
@@ -533,14 +576,14 @@ export default function MantencionPagos() {
                     : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                 }`}
               >
-                Cheque {estadoCheque.toUpperCase()} — {cantDocsCheque} pago(s) imputado(s)
+                Transferencia {estadoCheque.toUpperCase()} — {cantDocsCheque} pago(s) imputado(s)
               </span>
             )}
             <button
               onClick={limpiarCheque}
               className="px-3 py-1 text-xs font-semibold border border-[#cbd5e1] rounded-lg text-[#475569] hover:bg-[#f1f5f9]"
             >
-              Limpiar Cheque
+              Limpiar Transferencia
             </button>
           </div>
         </div>
@@ -562,7 +605,7 @@ export default function MantencionPagos() {
           </div>
 
           <div className="col-span-2 sm:col-span-2 lg:col-span-2">
-            <label className="block text-xs font-semibold text-[#475569] mb-1">N° Cheque / Documento</label>
+            <label className="block text-xs font-semibold text-[#475569] mb-1">N° Transferencia / Documento</label>
             <div className="flex gap-1.5">
               <input
                 type="text"
@@ -582,7 +625,7 @@ export default function MantencionPagos() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-[#475569] mb-1">Monto Cheque ($)</label>
+            <label className="block text-xs font-semibold text-[#475569] mb-1">Monto Transferencia ($)</label>
             <input
               type="number"
               value={montoCheque}
@@ -616,7 +659,7 @@ export default function MantencionPagos() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-[#475569] mb-1">Fecha Documento</label>
+            <label className="block text-xs font-semibold text-[#475569] mb-1">Fecha Transferencia</label>
             <input
               type="date"
               value={fechaCheque}
@@ -632,10 +675,12 @@ export default function MantencionPagos() {
             <select
               value={tipoCheque}
               onChange={e => setTipoCheque(e.target.value)}
-              className="w-full px-3 py-1.5 text-xs border border-[#cbd5e1] rounded-lg bg-white"
+              className="w-full px-3 py-1.5 text-xs border border-[#cbd5e1] rounded-lg bg-white font-semibold text-[#016098]"
             >
-              <option value="Cheque">Cheque</option>
+              <option value="Transferencia">Transferencia</option>
+              <option value="Depósito">Depósito</option>
               <option value="V. Vista">V. Vista</option>
+              <option value="Cheque">Cheque</option>
             </select>
           </div>
 
@@ -652,7 +697,7 @@ export default function MantencionPagos() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-[#475569] mb-1">Estado Cheque</label>
+            <label className="block text-xs font-semibold text-[#475569] mb-1">Estado Transferencia</label>
             <select
               value={estadoCheque}
               onChange={e => setEstadoCheque(e.target.value)}
@@ -669,7 +714,7 @@ export default function MantencionPagos() {
               disabled={cargando}
               className="px-4 py-2 bg-[#016098] text-white text-xs font-bold rounded-lg hover:bg-[#014b78]"
             >
-              {chequeEncontrado ? 'Actualizar Cheque' : 'Registrar Cheque'}
+              {chequeEncontrado ? 'Actualizar Transferencia' : 'Registrar Transferencia'}
             </button>
 
             {movimientosCheque.length > 0 && (
@@ -678,13 +723,19 @@ export default function MantencionPagos() {
                   onClick={() => setMostrarMovsCheque(!mostrarMovsCheque)}
                   className="px-3.5 py-2 bg-[#39BABD] text-white text-xs font-semibold rounded-lg hover:bg-[#2da1a4]"
                 >
-                  {mostrarMovsCheque ? 'Ocultar Pagos del Cheque' : `Ver Pagos del Cheque (${movimientosCheque.length})`}
+                  {mostrarMovsCheque ? 'Ocultar Pagos Transferencia' : `Ver Pagos Transferencia (${movimientosCheque.length})`}
                 </button>
                 <button
                   onClick={exportarMovimientosChequeExcel}
                   className="px-3.5 py-2 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700"
                 >
-                  Exportar Cheque Excel
+                  Exportar Excel
+                </button>
+                <button
+                  onClick={exportarMovimientosChequePDF}
+                  className="px-3.5 py-2 bg-[#016098] text-white text-xs font-semibold rounded-lg hover:bg-[#014b78]"
+                >
+                  Exportar PDF
                 </button>
               </>
             )}
@@ -924,7 +975,7 @@ export default function MantencionPagos() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#475569] mb-1">N° Documento / Cheque</label>
+              <label className="block text-xs font-semibold text-[#475569] mb-1">N° Transferencia / Documento</label>
               <input
                 type="text"
                 value={numDocPago}
@@ -935,7 +986,7 @@ export default function MantencionPagos() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#475569] mb-1">Fecha Documento</label>
+              <label className="block text-xs font-semibold text-[#475569] mb-1">Fecha Transferencia / Doc.</label>
               <input
                 type="date"
                 value={fechaDocPago}
@@ -1055,20 +1106,88 @@ export default function MantencionPagos() {
         <div className="lg:col-span-7 space-y-6">
           {/* Movimientos de Pago de la Licencia Seleccionada */}
           <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-5">
-            <h2 className="text-sm font-bold text-[#016098] uppercase tracking-wider mb-3">
-              4. Detalle de Pagos Registrados para la Licencia {licenciaActiva ? `#${licenciaActiva.NumeroLicencia}` : ''}
-            </h2>
+            <div className="flex flex-wrap justify-between items-center gap-2 mb-3">
+              <h2 className="text-sm font-bold text-[#016098] uppercase tracking-wider">
+                4. Detalle de Pagos Registrados para la Licencia {licenciaActiva ? `#${licenciaActiva.NumeroLicencia}` : ''}
+              </h2>
+              {detallePagosLicencia.length > 0 && (
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      exportToExcel(
+                        detallePagosLicencia.map(d => ({
+                          'ID': d.Correlativo,
+                          'N° Transferencia': d.NumeroDocumento,
+                          'Banco': d.Banco,
+                          'Concepto': d.Concepto,
+                          'Días Pagados': d.DiasPagados,
+                          'Monto ($)': d.Monto,
+                          'Fecha Doc.': formatDateDDMMYYYY(d.FechaDepCtaCte),
+                          'Recepción': formatDateDDMMYYYY(d.Recepcion),
+                          'Observación': d.Observacion
+                        })),
+                        `Pagos_Licencia_${licenciaActiva?.NumeroLicencia || 'Activa'}`
+                      )
+                    }
+                    className="px-2.5 py-1 bg-emerald-600 text-white text-[11px] font-bold rounded-lg hover:bg-emerald-700"
+                  >
+                    Exportar Excel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const totalM = detallePagosLicencia.reduce((acc, d) => acc + Number(d.Monto || 0), 0);
+                      exportToCorporatePDF({
+                        title: `DETALLE DE PAGOS DE LICENCIA MÉDICA #${licenciaActiva?.NumeroLicencia || ''}`,
+                        subtitle: funcionario
+                          ? `Funcionario: ${funcionario.NombreCompleto} (${funcionario.Rut}-${funcionario.DV})`
+                          : 'Detalle de Movimientos Imputados',
+                        meta: [
+                          { label: 'N° Licencia', value: licenciaActiva?.NumeroLicencia || '-' },
+                          { label: 'RUT Funcionario', value: funcionario ? `${funcionario.Rut}-${funcionario.DV}` : '-' }
+                        ],
+                        columns: [
+                          { header: 'ID', key: 'Correlativo', align: 'center' },
+                          { header: 'N° Transferencia', key: 'NumeroDocumento' },
+                          { header: 'Banco', key: 'Banco' },
+                          { header: 'Concepto', key: 'Concepto' },
+                          { header: 'Días', key: 'DiasPagados', align: 'center' },
+                          { header: 'Monto ($)', key: 'MontoFmt', align: 'right' },
+                          { header: 'Fecha Doc.', key: 'FechaDocFmt', align: 'center' },
+                          { header: 'Recepción', key: 'RecepFmt', align: 'center' },
+                          { header: 'Observación', key: 'Observacion' }
+                        ],
+                        rows: detallePagosLicencia.map(d => ({
+                          ...d,
+                          MontoFmt: formatCurrencyCLP(d.Monto),
+                          FechaDocFmt: formatDateDDMMYYYY(d.FechaDepCtaCte),
+                          RecepFmt: formatDateDDMMYYYY(d.Recepcion)
+                        })),
+                        totalsRow: {
+                          Correlativo: 'TOTAL',
+                          MontoFmt: formatCurrencyCLP(totalM)
+                        }
+                      });
+                    }}
+                    className="px-2.5 py-1 bg-[#016098] text-white text-[11px] font-bold rounded-lg hover:bg-[#014b78]"
+                  >
+                    Exportar PDF
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[240px]">
               <table className="w-full text-left text-xs">
                 <thead className="bg-[#f1f5f9] text-[#475569] font-semibold sticky top-0">
                   <tr>
                     <th className="p-2">ID</th>
-                    <th className="p-2">N° Doc.</th>
+                    <th className="p-2">N° Transf.</th>
                     <th className="p-2">Banco</th>
                     <th className="p-2">Concepto</th>
                     <th className="p-2 text-center">Días</th>
                     <th className="p-2 text-right">Monto ($)</th>
-                    <th className="p-2">Fecha Doc.</th>
+                    <th className="p-2">Fecha Transf.</th>
                     <th className="p-2">Recepción</th>
                     <th className="p-2">Observación</th>
                     <th className="p-2 text-center">Acción</th>
@@ -1127,9 +1246,80 @@ export default function MantencionPagos() {
 
           {/* Grilla de Todas las Licencias del Funcionario */}
           <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-5">
-            <h2 className="text-sm font-bold text-[#016098] uppercase tracking-wider mb-3">
-              5. Licencias del Funcionario ({licenciasFuncionario.length}) — Clic para Seleccionar
-            </h2>
+            <div className="flex flex-wrap justify-between items-center gap-2 mb-3">
+              <h2 className="text-sm font-bold text-[#016098] uppercase tracking-wider">
+                5. Licencias del Funcionario ({licenciasFuncionario.length}) — Clic para Seleccionar
+              </h2>
+              {licenciasFuncionario.length > 0 && (
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      exportToExcel(
+                        licenciasFuncionario.map(l => ({
+                          'N° Licencia': l.NumeroLicencia,
+                          'Desde': formatDateDDMMYYYY(l.Desde),
+                          'Hasta': formatDateDDMMYYYY(l.Hasta),
+                          'Días Lic.': l.NumDias,
+                          'Días Pag.': l.NumDiasPagados,
+                          'Por Cobrar': l.DiasCobrar,
+                          'Pago Estimado ($)': l.PagoEstimado,
+                          'Total Pagado ($)': l.TotalPagado,
+                          'Modalidad': l.PagoDirecto
+                        })),
+                        `Licencias_Funcionario_${funcionario?.Rut || 'RUT'}`
+                      )
+                    }
+                    className="px-2.5 py-1 bg-emerald-600 text-white text-[11px] font-bold rounded-lg hover:bg-emerald-700"
+                  >
+                    Exportar Excel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const totEst = licenciasFuncionario.reduce((a, l) => a + Number(l.PagoEstimado || 0), 0);
+                      const totPag = licenciasFuncionario.reduce((a, l) => a + Number(l.TotalPagado || 0), 0);
+                      exportToCorporatePDF({
+                        title: `HISTORIAL DE LICENCIAS MÉDICAS DEL FUNCIONARIO`,
+                        subtitle: funcionario
+                          ? `${funcionario.NombreCompleto} (${funcionario.Rut}-${funcionario.DV}) — Cenco ${funcionario.Cenco}`
+                          : 'Detalle de Licencias',
+                        meta: [
+                          { label: 'Funcionario', value: funcionario?.NombreCompleto || '-' },
+                          { label: 'RUT', value: funcionario ? `${funcionario.Rut}-${funcionario.DV}` : '-' }
+                        ],
+                        columns: [
+                          { header: 'N° Licencia', key: 'NumeroLicencia' },
+                          { header: 'Desde', key: 'DesdeFmt', align: 'center' },
+                          { header: 'Hasta', key: 'HastaFmt', align: 'center' },
+                          { header: 'Días Lic.', key: 'NumDias', align: 'center' },
+                          { header: 'Días Pag.', key: 'NumDiasPagados', align: 'center' },
+                          { header: 'Por Cobrar', key: 'DiasCobrar', align: 'center' },
+                          { header: 'Pago Estimado', key: 'EstimadoFmt', align: 'right' },
+                          { header: 'Total Pagado', key: 'PagadoFmt', align: 'right' },
+                          { header: 'Modalidad', key: 'PagoDirecto' }
+                        ],
+                        rows: licenciasFuncionario.map(l => ({
+                          ...l,
+                          DesdeFmt: formatDateDDMMYYYY(l.Desde),
+                          HastaFmt: formatDateDDMMYYYY(l.Hasta),
+                          EstimadoFmt: formatCurrencyCLP(l.PagoEstimado),
+                          PagadoFmt: formatCurrencyCLP(l.TotalPagado)
+                        })),
+                        totalsRow: {
+                          NumeroLicencia: 'TOTAL',
+                          EstimadoFmt: formatCurrencyCLP(totEst),
+                          PagadoFmt: formatCurrencyCLP(totPag)
+                        }
+                      });
+                    }}
+                    className="px-2.5 py-1 bg-[#016098] text-white text-[11px] font-bold rounded-lg hover:bg-[#014b78]"
+                  >
+                    Exportar PDF
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[280px]">
               <table className="w-full text-left text-xs">
                 <thead className="bg-[#f1f5f9] text-[#475569] font-semibold sticky top-0">

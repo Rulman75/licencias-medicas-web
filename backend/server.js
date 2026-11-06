@@ -136,11 +136,30 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
             return r;
         };
 
+        const montoBaseExpr = `CASE WHEN ISNULL(L.PagoEstimado, 0) > 0 THEN ISNULL(L.PagoEstimado, 0) ELSE ISNULL(L.MontoDesc, 0) END`;
+        const esSaldadaSaludInicioExpr = `
+            CASE
+                WHEN (ISNULL(S.Descripcion, '') LIKE '%FONASA%' OR F.UltimaPrev = 41) THEN
+                    CASE
+                        WHEN ISNULL(L.NumDias, 0) <= 3 AND ISNULL(DP.CantAporte, 0) > 0 THEN 1
+                        WHEN ISNULL(L.NumDias, 0) > 3 AND ISNULL(DP.CantAporte, 0) > 0 AND ISNULL(DP.CantSubsidio, 0) > 0 THEN 1
+                        ELSE 0
+                    END
+                ELSE
+                    CASE
+                        WHEN ISNULL(DP.CantAporte, 0) > 0 OR ISNULL(DP.CantSubsidio, 0) > 0 THEN 1
+                        ELSE 0
+                    END
+            END
+        `;
+
         const dpJoin = `
             LEFT JOIN (
                 SELECT 
                     NumeroLicencia,
-                    SUM(COALESCE(Monto, 0)) as SumaMonto
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) NOT IN ('Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as SumaMonto,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) = 'Aporte' AND COALESCE(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantAporte,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') AND COALESCE(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantSubsidio
                 FROM LIC_DETALLE_PAGO_ACTUAL
                 GROUP BY NumeroLicencia
             ) DP ON L.NumeroLicencia = DP.NumeroLicencia
@@ -160,16 +179,17 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                 SUM(CASE WHEN ISNULL(L.Maternal, 0) = 1 THEN 1 ELSE 0 END) as Maternales,
                 SUM(CASE WHEN F.CodUnidad < 600 THEN 1 ELSE 0 END) as SectorEducacion,
                 SUM(CASE WHEN F.CodUnidad >= 600 THEN 1 ELSE 0 END) as SectorSalud,
-                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as TotalEstimado,
-                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as EstimadoConvenio,
-                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as EstimadoReposo,
-                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as TotalPagado,
-                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as PagadoConvenio,
-                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as PagadoReposo,
-                SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as LicenciasPagadas,
-                SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasPendientesPago
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN (${montoBaseExpr}) ELSE 0 END AS BIGINT)) as TotalEstimado,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP') THEN (${montoBaseExpr}) ELSE 0 END AS BIGINT)) as EstimadoConvenio,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN (${montoBaseExpr}) ELSE 0 END AS BIGINT)) as EstimadoReposo,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, 0) ELSE 0 END AS BIGINT)) as TotalPagado,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP') THEN COALESCE(DP.SumaMonto, 0) ELSE 0 END AS BIGINT)) as PagadoConvenio,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN COALESCE(DP.SumaMonto, 0) ELSE 0 END AS BIGINT)) as PagadoReposo,
+                SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') AND ISNULL(L.Rechazo, 0) = 0 AND (${esSaldadaSaludInicioExpr}) = 1 THEN 1 ELSE 0 END) as LicenciasPagadas,
+                SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') AND ISNULL(L.Rechazo, 0) = 0 AND (${esSaldadaSaludInicioExpr}) = 0 THEN 1 ELSE 0 END) as LicenciasPendientesPago
             FROM LIC_LICENCIA_ACTUAL L
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
+            LEFT JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
             LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
             ${dpJoin}
             WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' ${yearFilter}
@@ -194,8 +214,8 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                     SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) = 'Pago Directo' THEN 1 ELSE 0 END) as PagoDirecto,
                     SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo,
                     COUNT(*) as Total,
-                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as Estimado,
-                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as Pagado
+                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN (${montoBaseExpr}) ELSE 0 END AS BIGINT)) as Estimado,
+                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, 0) ELSE 0 END AS BIGINT)) as Pagado
                 FROM LIC_LICENCIA_ACTUAL L
                 LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 ${dpJoin}
@@ -210,8 +230,8 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                     SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) = 'Pago Directo' THEN 1 ELSE 0 END) as PagoDirecto,
                     SUM(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) IN ('ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra') THEN 1 ELSE 0 END) as Reposo,
                     COUNT(*) as Total,
-                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as Estimado,
-                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as Pagado
+                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN (${montoBaseExpr}) ELSE 0 END AS BIGINT)) as Estimado,
+                    SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, 0) ELSE 0 END AS BIGINT)) as Pagado
                 FROM LIC_LICENCIA_ACTUAL L
                 LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 ${dpJoin}
@@ -227,8 +247,8 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                 RTRIM(ISNULL(S.Descripcion, 'SIN INFORMACIÓN')) as Institucion,
                 COUNT(*) as Cantidad,
                 SUM(CAST(ISNULL(L.NumDias, 0) AS BIGINT)) as Dias,
-                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN ISNULL(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as Estimado,
-                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as Pagado
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN (${montoBaseExpr}) ELSE 0 END AS BIGINT)) as Estimado,
+                SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, 0) ELSE 0 END AS BIGINT)) as Pagado
             FROM LIC_LICENCIA_ACTUAL L
             INNER JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             INNER JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
@@ -274,8 +294,8 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                 ISNULL(L.Rechazo, 0) as Rechazo,
                 ISNULL(L.regularizado, 0) as Reducida,
                 ISNULL(L.Maternal, 0) as Maternal,
-                ISNULL(L.PagoEstimado, 0) as PagoEstimado,
-                COALESCE(DP.SumaMonto, P.TotalPagado, 0) as TotalPagado
+                (${montoBaseExpr}) as PagoEstimado,
+                COALESCE(DP.SumaMonto, 0) as TotalPagado
             FROM LIC_LICENCIA_ACTUAL L
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
@@ -368,7 +388,9 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
 app.get('/api/dashboard/convenio-mensual', async (req, res) => {
     try {
         const pool = await getConnection();
-        const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+        const rawYear = String(req.query.year || '').trim().toLowerCase();
+        const isHistorico = rawYear === '' || rawYear === 'historico' || rawYear === 'todos';
+        const year = isHistorico ? 'historico' : (parseInt(rawYear, 10) || new Date().getFullYear());
         const criterio = req.query.criterio === 'recepcion' ? 'L.Recepcion' : 'L.Desde';
         const sector = String(req.query.sector || '').toLowerCase();
 
@@ -376,114 +398,141 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
         if (sector === 'educacion') sectorFilter = ' AND F.CodUnidad < 600 ';
         else if (sector === 'salud') sectorFilter = ' AND F.CodUnidad >= 600 ';
 
-        const result = await pool.request()
-            .input('Year', sql.Int, year)
-            .query(`
+        let yearWhere = '';
+        const reqDb = pool.request();
+        if (!isHistorico) {
+            reqDb.input('Year', sql.Int, year);
+            yearWhere = ` AND YEAR(${criterio}) = @Year `;
+        }
+
+        const montoBase = `CASE WHEN COALESCE(L.PagoEstimado, 0) > 0 THEN COALESCE(L.PagoEstimado, 0) ELSE COALESCE(L.MontoDesc, 0) END`;
+        const esSaldadaSalud = `
+            CASE
+                WHEN ISNULL(L.Rechazo, 0) = 1 THEN 0
+                WHEN (ISNULL(S.Descripcion, '') LIKE '%FONASA%' OR F.UltimaPrev = 41) THEN
+                    CASE
+                        WHEN COALESCE(L.NumDias, 0) <= 3 AND COALESCE(DP.CantAporte, 0) > 0 THEN 1
+                        WHEN COALESCE(L.NumDias, 0) > 3 AND COALESCE(DP.CantAporte, 0) > 0 AND COALESCE(DP.CantSubsidio, 0) > 0 THEN 1
+                        ELSE 0
+                    END
+                ELSE
+                    CASE
+                        WHEN COALESCE(DP.CantAporte, 0) > 0 OR COALESCE(DP.CantSubsidio, 0) > 0 THEN 1
+                        ELSE 0
+                    END
+            END
+        `;
+        const montoDescEfectivo = `CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.CantDevolucion, 0) = 0 AND COALESCE(DP.MontoSalud, 0) = 0 THEN COALESCE(DP.MontoDescuentoBruto, 0) ELSE 0 END`;
+
+        const result = await reqDb.query(`
                 SELECT
-                    MONTH(${criterio}) as Mes,
+                    ISNULL(MONTH(${criterio}), 0) as Mes,
                     COUNT(*) as TotalLicencias,
                     COUNT(DISTINCT L.RutFuncionario) as TotalFuncionarios,
                     SUM(COALESCE(L.NumDias, 0)) as TotalDias,
                     SUM(COALESCE(L.DiasAutorizados, 0)) as TotalDiasAut,
-                    SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as LicenciasPagadas,
-                    SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasSinPago,
-                    SUM(CASE WHEN COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasPorCobrarSalud,
-                    SUM(CASE WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) > COALESCE(L.PagoEstimado, 0) AND ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasSobrepago,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND (${esSaldadaSalud}) = 1 THEN 1 ELSE 0 END) as LicenciasPagadas,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND (${esSaldadaSalud}) = 0 AND COALESCE(DP.MontoSalud, 0) = 0 THEN 1 ELSE 0 END) as LicenciasSinPago,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND (${esSaldadaSalud}) = 0 AND COALESCE(DP.MontoSalud, 0) > 0 THEN 1 ELSE 0 END) as LicenciasPagoParcialSalud,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND (${esSaldadaSalud}) = 0 THEN 1 ELSE 0 END) as LicenciasPorCobrarSalud,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) > (${montoBase}) THEN 1 ELSE 0 END) as LicenciasSobrepago,
                     SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 THEN 1 ELSE 0 END) as LicenciasRechazadas,
-                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.MontoSalud, 0) > 0 THEN 1 ELSE 0 END) as FalsosRechazosPagadosCant,
-                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.MontoSalud, 0) > 0 AND COALESCE(DP.MontoDescuentoFunc, 0) > 0 THEN 1 ELSE 0 END) as FalsosRechazosDobleCobroCant,
+                    SUM(CASE WHEN RTRIM(ISNULL(L.Estado, '')) = 'AUT_PAGO_SALUD' THEN 1 ELSE 0 END) as AutorizadasPorPagoSaludCant,
+                    SUM(CASE WHEN RTRIM(ISNULL(L.Estado, '')) = 'AUT_PAGO_SALUD' THEN 1 ELSE 0 END) as FalsosRechazosPagadosCant,
+                    SUM(CASE WHEN RTRIM(ISNULL(L.Estado, '')) = 'AUT_PAGO_SALUD' AND COALESCE(DP.MontoDescuentoBruto, 0) > 0 AND COALESCE(DP.CantDevolucion, 0) = 0 THEN 1 ELSE 0 END) as FalsosRechazosDobleCobroCant,
                     SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND (L.Observacion_Compin LIKE '%Autorizada%' OR L.Observacion_Compin LIKE '%Ampliada%') THEN 1 ELSE 0 END) as FalsosRechazosCompinCant,
-                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.MontoSalud, 0) = 0 AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 THEN 1 ELSE 0 END) as RechazadasRecuperadasDescCant,
-                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND (COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 OR COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0)) AND RTRIM(ISNULL(F.vigencia, '')) = 'S' THEN 1 ELSE 0 END) as RechazadasRecuperablesCant,
-                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND (COALESCE(DP.SumaMonto, P.TotalPagado, 0) = 0 OR COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0)) AND RTRIM(ISNULL(F.vigencia, '')) <> 'S' THEN 1 ELSE 0 END) as RechazadasIncobrablesCant,
-                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) > 0 AND COALESCE(DP.SumaMonto, P.TotalPagado, 0) >= COALESCE(L.PagoEstimado, 0) THEN 1 ELSE 0 END) as RechazadasRecuperadasCant,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND (${montoDescEfectivo}) > 0 AND (${montoDescEfectivo}) >= (${montoBase}) THEN 1 ELSE 0 END) as RechazadasRecuperadasDescCant,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND ((${montoDescEfectivo}) = 0 OR (${montoBase}) > (${montoDescEfectivo})) AND RTRIM(ISNULL(F.vigencia, '')) = 'S' THEN 1 ELSE 0 END) as RechazadasRecuperablesCant,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND ((${montoDescEfectivo}) = 0 OR (${montoBase}) > (${montoDescEfectivo})) AND RTRIM(ISNULL(F.vigencia, '')) <> 'S' THEN 1 ELSE 0 END) as RechazadasIncobrablesCant,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND (${montoDescEfectivo}) > 0 AND (${montoDescEfectivo}) >= (${montoBase}) THEN 1 ELSE 0 END) as RechazadasRecuperadasCant,
                     SUM(CASE WHEN ISNULL(L.regularizado, 0) = 1 THEN 1 ELSE 0 END) as LicenciasReducidas,
-                    SUM(COALESCE(DP.DiasSubsidio, P.NumDiasPagados, 0)) as DiasSubsidio,
+                    SUM(COALESCE(DP.DiasSubsidio, 0)) as DiasSubsidio,
                     SUM(COALESCE(DP.DiasAporte, 0)) as DiasAporte,
-                    SUM(COALESCE(DP.DiasDescuento, 0)) as DiasDescuento,
-                    SUM(CAST(COALESCE(L.PagoEstimado, 0) AS BIGINT)) as TotalEstimado,
-                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 THEN COALESCE(L.PagoEstimado, 0) ELSE 0 END AS BIGINT)) as EstimadoNoRechazado,
-                    SUM(CAST(COALESCE(DP.SumaMonto, P.TotalPagado, 0) AS BIGINT)) as TotalPagado,
-                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) ELSE 0 END AS BIGINT)) as PagadoNoRechazado,
-                    SUM(CAST(COALESCE(DP.MontoSubsidio, P.TotalPagado, 0) AS BIGINT)) as PagadoSubsidio,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.CantDevolucion, 0) = 0 AND COALESCE(DP.MontoSalud, 0) = 0 THEN COALESCE(DP.DiasDescuento, 0) ELSE 0 END) as DiasDescuento,
+                    SUM(CAST(${montoBase} AS BIGINT)) as TotalEstimado,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 THEN (${montoBase}) ELSE 0 END AS BIGINT)) as EstimadoNoRechazado,
+                    SUM(CAST(COALESCE(DP.MontoSalud, 0) AS BIGINT)) as TotalPagado,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 THEN COALESCE(DP.MontoSalud, 0) ELSE 0 END AS BIGINT)) as PagadoNoRechazado,
+                    SUM(CAST(COALESCE(DP.MontoSubsidio, 0) AS BIGINT)) as PagadoSubsidio,
                     SUM(CAST(COALESCE(DP.MontoAporte, 0) AS BIGINT)) as PagadoAporte,
-                    SUM(CAST(COALESCE(DP.MontoSalud, P.TotalPagado, 0) AS BIGINT)) as PagadoSaludTotal,
-                    SUM(CAST(COALESCE(DP.MontoDescuentoFunc, 0) AS BIGINT)) as PagadoDescuentoFunc,
+                    SUM(CAST(COALESCE(DP.MontoSalud, 0) AS BIGINT)) as PagadoSaludTotal,
+                    SUM(CAST(${montoDescEfectivo} AS BIGINT)) as PagadoDescuentoFunc,
                     SUM(CAST(
                         CASE 
-                            WHEN COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND ISNULL(L.Rechazo, 0) = 0
-                            THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                            WHEN ISNULL(L.Rechazo, 0) = 0 AND (${esSaldadaSalud}) = 0 AND (${montoBase}) > COALESCE(DP.MontoSalud, 0)
+                            THEN (${montoBase}) - COALESCE(DP.MontoSalud, 0)
                             ELSE 0
                         END AS BIGINT
                     )) as FaltaPorCobrar,
                     SUM(CAST(
                         CASE 
-                            WHEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) > COALESCE(L.PagoEstimado, 0) AND ISNULL(L.Rechazo, 0) = 0
-                            THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0) - COALESCE(L.PagoEstimado, 0)
+                            WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) > (${montoBase})
+                            THEN COALESCE(DP.MontoSalud, 0) - (${montoBase})
                             ELSE 0
                         END AS BIGINT
                     )) as ExcedenteSobreEstimado,
                     SUM(CAST(
                         CASE
-                            WHEN ISNULL(L.Rechazo, 0) = 1 THEN COALESCE(L.PagoEstimado, 0)
+                            WHEN ISNULL(L.Rechazo, 0) = 1 THEN (${montoBase})
                             ELSE 0
                         END AS BIGINT
                     )) as MontoRechazado,
                     SUM(CAST(
                         CASE
-                            WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND RTRIM(ISNULL(F.vigencia, '')) = 'S'
-                            THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                            WHEN ISNULL(L.Rechazo, 0) = 1 AND (${montoBase}) > (${montoDescEfectivo}) AND RTRIM(ISNULL(F.vigencia, '')) = 'S'
+                            THEN (${montoBase}) - (${montoDescEfectivo})
                             ELSE 0
                         END AS BIGINT
                     )) as MontoRechazadoRecuperable,
                     SUM(CAST(
                         CASE
-                            WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND RTRIM(ISNULL(F.vigencia, '')) <> 'S'
-                            THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                            WHEN ISNULL(L.Rechazo, 0) = 1 AND (${montoBase}) > (${montoDescEfectivo}) AND RTRIM(ISNULL(F.vigencia, '')) <> 'S'
+                            THEN (${montoBase}) - (${montoDescEfectivo})
                             ELSE 0
                         END AS BIGINT
                     )) as MontoRechazadoIncobrable,
+                    SUM(CAST(${montoDescEfectivo} AS BIGINT)) as MontoRechazadoRecuperado,
                     SUM(CAST(
                         CASE
-                            WHEN ISNULL(L.Rechazo, 0) = 1 THEN COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                            WHEN RTRIM(ISNULL(L.Estado, '')) = 'AUT_PAGO_SALUD' THEN COALESCE(DP.MontoSalud, 0)
                             ELSE 0
                         END AS BIGINT
-                    )) as MontoRechazadoRecuperado,
+                    )) as MontoAutorizadasPorPagoSalud,
                     SUM(CAST(
                         CASE
-                            WHEN ISNULL(L.Rechazo, 0) = 1 THEN COALESCE(DP.MontoSalud, 0)
+                            WHEN RTRIM(ISNULL(L.Estado, '')) = 'AUT_PAGO_SALUD' THEN COALESCE(DP.MontoSalud, 0)
                             ELSE 0
                         END AS BIGINT
                     )) as MontoFalsoRechazoSalud,
-                    SUM(CAST(
-                        CASE
-                            WHEN ISNULL(L.Rechazo, 0) = 1 THEN COALESCE(DP.MontoDescuentoFunc, 0)
-                            ELSE 0
-                        END AS BIGINT
-                    )) as MontoRechazadoDescuentoFunc
+                    SUM(CAST(${montoDescEfectivo} AS BIGINT)) as MontoRechazadoDescuentoFunc
                 FROM LIC_LICENCIA_ACTUAL L
                 LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
+                LEFT JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
                 LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 LEFT JOIN (
                     SELECT
                         NumeroLicencia,
-                        SUM(COALESCE(Monto, 0)) as SumaMonto,
                         SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoAporte,
                         SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
                         SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSalud,
-                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) IN ('Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoDescuentoFunc,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Descuento' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoDescuentoBruto,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Devolucion' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoDevolucion,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' AND COALESCE(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantAporte,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') AND COALESCE(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantSubsidio,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Descuento' AND COALESCE(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantDescuento,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Devolucion' AND COALESCE(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantDevolucion,
                         SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasAporte,
                         SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
-                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) IN ('Descuento', 'Devolucion') THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasDescuento,
+                        SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Descuento' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasDescuento,
                         COUNT(*) as CantPagos
                     FROM LIC_DETALLE_PAGO_ACTUAL
                     GROUP BY NumeroLicencia
                 ) DP ON L.NumeroLicencia = DP.NumeroLicencia
                 WHERE RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP')
-                  AND YEAR(${criterio}) = @Year
+                  ${yearWhere}
                   ${sectorFilter}
-                GROUP BY MONTH(${criterio})
-                ORDER BY MONTH(${criterio}) ASC
+                GROUP BY ISNULL(MONTH(${criterio}), 0)
+                ORDER BY ISNULL(MONTH(${criterio}), 0) ASC
             `);
 
         const mesesNombres = [
@@ -505,9 +554,11 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
             TotalDiasAut: 0,
             LicenciasPagadas: 0,
             LicenciasSinPago: 0,
+            LicenciasPagoParcialSalud: 0,
             LicenciasPorCobrarSalud: 0,
             LicenciasSobrepago: 0,
             LicenciasRechazadas: 0,
+            AutorizadasPorPagoSaludCant: 0,
             FalsosRechazosPagadosCant: 0,
             FalsosRechazosDobleCobroCant: 0,
             FalsosRechazosCompinCant: 0,
@@ -533,6 +584,7 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
             MontoRechazadoRecuperable: 0,
             MontoRechazadoIncobrable: 0,
             MontoRechazadoRecuperado: 0,
+            MontoAutorizadasPorPagoSalud: 0,
             MontoFalsoRechazoSalud: 0,
             MontoRechazadoDescuentoFunc: 0,
             FaltaPorCobrarTotal: 0
@@ -559,9 +611,11 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                 TotalDiasAut: Number(r.TotalDiasAut || 0),
                 LicenciasPagadas: licPag,
                 LicenciasSinPago: Number(r.LicenciasSinPago || 0),
+                LicenciasPagoParcialSalud: Number(r.LicenciasPagoParcialSalud || 0),
                 LicenciasPorCobrarSalud: Number(r.LicenciasPorCobrarSalud || 0),
                 LicenciasSobrepago: Number(r.LicenciasSobrepago || 0),
                 LicenciasRechazadas: licRech,
+                AutorizadasPorPagoSaludCant: Number(r.AutorizadasPorPagoSaludCant || 0),
                 FalsosRechazosPagadosCant: Number(r.FalsosRechazosPagadosCant || 0),
                 FalsosRechazosDobleCobroCant: Number(r.FalsosRechazosDobleCobroCant || 0),
                 FalsosRechazosCompinCant: Number(r.FalsosRechazosCompinCant || 0),
@@ -587,6 +641,7 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                 MontoRechazadoRecuperable: mRecup,
                 MontoRechazadoIncobrable: mIncob,
                 MontoRechazadoRecuperado: Number(r.MontoRechazadoRecuperado || 0),
+                MontoAutorizadasPorPagoSalud: Number(r.MontoAutorizadasPorPagoSalud || 0),
                 MontoFalsoRechazoSalud: Number(r.MontoFalsoRechazoSalud || 0),
                 MontoRechazadoDescuentoFunc: Number(r.MontoRechazadoDescuentoFunc || 0),
                 FaltaPorCobrarTotal: falta + mRecup + mIncob,
@@ -601,6 +656,18 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                     totales[k] += rowObj[k];
                 }
             }
+        }
+
+        // Si en vista histórica existen registros con fecha nula (Mes = 0), sumarlos al total general
+        if (mapaMes[0]) {
+            const r0 = mapaMes[0];
+            for (const k of Object.keys(totales)) {
+                if (r0[k] !== undefined && k !== 'FaltaPorCobrarTotal') {
+                    totales[k] += Number(r0[k] || 0);
+                }
+            }
+            totales.FaltaPorCobrarTotal =
+                totales.FaltaPorCobrar + totales.MontoRechazadoRecuperable + totales.MontoRechazadoIncobrable;
         }
 
         totales.PorcentajePago = totales.TotalEstimado > 0
@@ -627,19 +694,44 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
 app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
     try {
         const pool = await getConnection();
-        const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+        const rawYear = String(req.query.year || '').trim().toLowerCase();
+        const isHistorico = rawYear === '' || rawYear === 'historico' || rawYear === 'todos';
+        const year = isHistorico ? 'historico' : (parseInt(rawYear, 10) || new Date().getFullYear());
         const month = req.query.month ? parseInt(req.query.month, 10) : 0;
         const criterio = req.query.criterio === 'recepcion' ? 'L.Recepcion' : 'L.Desde';
         const sector = String(req.query.sector || '').toLowerCase();
 
-        const reqDb = pool.request().input('Year', sql.Int, year);
+        const reqDb = pool.request();
         let extraWhere = '';
+        if (!isHistorico) {
+            reqDb.input('Year', sql.Int, year);
+            extraWhere += ` AND YEAR(${criterio}) = @Year `;
+        }
         if (month >= 1 && month <= 12) {
             reqDb.input('Month', sql.Int, month);
             extraWhere += ` AND MONTH(${criterio}) = @Month `;
         }
         if (sector === 'educacion') extraWhere += ' AND F.CodUnidad < 600 ';
         else if (sector === 'salud') extraWhere += ' AND F.CodUnidad >= 600 ';
+
+        const montoBase = `CASE WHEN COALESCE(L.PagoEstimado, 0) > 0 THEN COALESCE(L.PagoEstimado, 0) ELSE COALESCE(L.MontoDesc, 0) END`;
+        const esSaldadaSalud = `
+            CASE
+                WHEN ISNULL(L.Rechazo, 0) = 1 THEN 0
+                WHEN (ISNULL(S.Descripcion, '') LIKE '%FONASA%' OR F.UltimaPrev = 41) THEN
+                    CASE
+                        WHEN COALESCE(L.NumDias, 0) <= 3 AND COALESCE(DP.CantAporte, 0) > 0 THEN 1
+                        WHEN COALESCE(L.NumDias, 0) > 3 AND COALESCE(DP.CantAporte, 0) > 0 AND COALESCE(DP.CantSubsidio, 0) > 0 THEN 1
+                        ELSE 0
+                    END
+                ELSE
+                    CASE
+                        WHEN COALESCE(DP.CantAporte, 0) > 0 OR COALESCE(DP.CantSubsidio, 0) > 0 THEN 1
+                        ELSE 0
+                    END
+            END
+        `;
+        const montoDescEfectivo = `CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.CantDevolucion, 0) = 0 AND COALESCE(DP.MontoSalud, 0) = 0 THEN COALESCE(DP.MontoDescuentoBruto, 0) ELSE 0 END`;
 
         const detRes = await reqDb.query(`
             SELECT
@@ -655,31 +747,45 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                 CONVERT(varchar, L.Recepcion, 23) as Recepcion,
                 CONVERT(varchar, L.Desde, 23) as Desde,
                 CONVERT(varchar, L.Hasta, 23) as Hasta,
-                CONVERT(varchar, DP.FechaPagoRaw, 23) as FechaPago,
+                CONVERT(varchar, COALESCE(DP.FechaPagoSaludRaw, DP.FechaPagoRaw), 23) as FechaPago,
                 COALESCE(L.NumDias, 0) as NumDias,
                 COALESCE(L.DiasAutorizados, 0) as DiasAutorizados,
-                COALESCE(DP.DiasSubsidio, P.NumDiasPagados, 0) as DiasSubsidio,
+                COALESCE(DP.DiasSubsidio, 0) as DiasSubsidio,
                 COALESCE(DP.DiasAporte, 0) as DiasAporte,
-                COALESCE(DP.DiasDescuento, 0) as DiasDescuento,
-                COALESCE(L.PagoEstimado, 0) as PagoEstimado,
-                COALESCE(DP.SumaMonto, P.TotalPagado, 0) as MontoPagado,
-                COALESCE(DP.MontoSubsidio, P.TotalPagado, 0) as PagadoSubsidio,
+                CASE WHEN ISNULL(L.Rechazo, 0) = 1 AND COALESCE(DP.CantDevolucion, 0) = 0 AND COALESCE(DP.MontoSalud, 0) = 0 THEN COALESCE(DP.DiasDescuento, 0) ELSE 0 END as DiasDescuento,
+                (${montoBase}) as PagoEstimado,
+                COALESCE(L.PagoEstimado, 0) as PagoEstimadoOriginal,
+                COALESCE(L.MontoDesc, 0) as MontoDesc,
+                COALESCE(DP.MontoSalud, 0) as MontoPagado,
+                COALESCE(DP.MontoSubsidio, 0) as PagadoSubsidio,
                 COALESCE(DP.MontoAporte, 0) as PagadoAporte,
-                COALESCE(DP.MontoSalud, P.TotalPagado, 0) as PagadoSalud,
-                COALESCE(DP.MontoDescuentoFunc, 0) as PagadoDescuento,
+                COALESCE(DP.MontoSalud, 0) as PagadoSalud,
+                (${montoDescEfectivo}) as PagadoDescuento,
+                (${esSaldadaSalud}) as EsSaldadaSalud,
+                CASE WHEN RTRIM(ISNULL(L.Estado, '')) = 'AUT_PAGO_SALUD' THEN 1 ELSE 0 END as EsAutorizadaPorPagoSalud,
                 CASE 
-                    WHEN COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0) AND ISNULL(L.Rechazo, 0) = 0
-                    THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
+                    WHEN ISNULL(L.Rechazo, 0) = 0 AND (${esSaldadaSalud}) = 0 AND (${montoBase}) > COALESCE(DP.MontoSalud, 0)
+                    THEN (${montoBase}) - COALESCE(DP.MontoSalud, 0)
                     ELSE 0
                 END as FaltaPorCobrar,
                 CASE 
-                    WHEN COALESCE(L.PagoEstimado, 0) > COALESCE(DP.SumaMonto, P.TotalPagado, 0)
-                    THEN COALESCE(L.PagoEstimado, 0) - COALESCE(DP.SumaMonto, P.TotalPagado, 0)
-                    ELSE 0
+                    WHEN ISNULL(L.Rechazo, 0) = 0 THEN
+                        CASE
+                            WHEN (${esSaldadaSalud}) = 0 AND (${montoBase}) > COALESCE(DP.MontoSalud, 0)
+                            THEN (${montoBase}) - COALESCE(DP.MontoSalud, 0)
+                            ELSE 0
+                        END
+                    ELSE
+                        CASE
+                            WHEN (${montoBase}) > (${montoDescEfectivo})
+                            THEN (${montoBase}) - (${montoDescEfectivo})
+                            ELSE 0
+                        END
                 END as SaldoPendiente,
-                COALESCE(DP.CantPagos, 0) as CantidadPagos,
+                COALESCE(DP.CantPagosSalud, 0) as CantidadPagos,
                 ISNULL(L.Rechazo, 0) as Rechazo,
                 ISNULL(L.regularizado, 0) as Reducida,
+                RTRIM(ISNULL(L.Estado, '')) as Estado,
                 RTRIM(ISNULL(L.Autorizada, '')) as Autorizada,
                 RTRIM(ISNULL(L.Observacion_Compin, '')) as Observacion_Compin,
                 RTRIM(ISNULL(L.Obser_apelacion, '')) as Obser_apelacion,
@@ -692,21 +798,26 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
             LEFT JOIN (
                 SELECT
                     NumeroLicencia,
-                    SUM(COALESCE(Monto, 0)) as SumaMonto,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoAporte,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSubsidio,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoSalud,
-                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) IN ('Descuento', 'Devolucion') THEN COALESCE(Monto, 0) ELSE 0 END) as MontoDescuentoFunc,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Descuento' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoDescuentoBruto,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Devolucion' THEN COALESCE(Monto, 0) ELSE 0 END) as MontoDevolucion,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' AND COALESCE(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantAporte,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') AND COALESCE(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantSubsidio,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Descuento' AND COALESCE(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantDescuento,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Devolucion' AND COALESCE(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantDevolucion,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Aporte' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasAporte,
                     SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
-                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) IN ('Descuento', 'Devolucion') THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasDescuento,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) = 'Descuento' THEN COALESCE(DiasPagados, 0) ELSE 0 END) as DiasDescuento,
+                    MAX(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Descuento', 'Devolucion') THEN FechaDepCtaCte ELSE NULL END) as FechaPagoSaludRaw,
                     MAX(FechaDepCtaCte) as FechaPagoRaw,
+                    SUM(CASE WHEN RTRIM(COALESCE(concepto, '')) NOT IN ('Descuento', 'Devolucion') THEN 1 ELSE 0 END) as CantPagosSalud,
                     COUNT(*) as CantPagos
                 FROM LIC_DETALLE_PAGO_ACTUAL
                 GROUP BY NumeroLicencia
             ) DP ON L.NumeroLicencia = DP.NumeroLicencia
             WHERE RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'ACHS', 'ACHS OR', 'Mutual', 'Mutual OR', 'Otra', 'PPP')
-              AND YEAR(${criterio}) = @Year
               ${extraWhere}
             ORDER BY ${criterio} DESC, L.NumeroLicencia DESC
         `);
@@ -725,30 +836,24 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
 
             const esRechazada = Boolean(r.Rechazo);
             const esVigente = String(r.Vigencia || '').toUpperCase() === 'S';
-            const pagado = Number(r.MontoPagado || 0);
+            const esSaldada = Boolean(r.EsSaldadaSalud);
+            const esAutPorPago = Boolean(r.EsAutorizadaPorPagoSalud);
+            const esFonasa = /fonasa/i.test(String(r.Salud || ''));
+            const numDias = Number(r.NumDias || 0);
             const pagadoSalud = Number(r.PagadoSalud || 0);
+            const pagadoSubsidio = Number(r.PagadoSubsidio || 0);
+            const pagadoAporte = Number(r.PagadoAporte || 0);
             const pagadoDesc = Number(r.PagadoDescuento || 0);
             const estimado = Number(r.PagoEstimado || 0);
-            const tieneSaldoPendiente = pagado === 0 || estimado > pagado;
+            const tieneSaldoPendienteRech = pagadoDesc === 0 || estimado > pagadoDesc;
             const obsCompin = String(r.Observacion_Compin || '');
             const compinAutorizada = /autorizada|ampliada/i.test(obsCompin);
-            const esFalsoRechazoPagado = esRechazada && pagadoSalud > 0;
-            const esDobleCobro = esRechazada && pagadoSalud > 0 && pagadoDesc > 0;
             const esFalsoRechazoCompin = esRechazada && compinAutorizada;
 
             let escenarioCobro = 'PAGADA';
-            let situacionCobroLabel = 'Pagada / Recuperada';
+            let situacionCobroLabel = 'Saldada (Inst. de Salud)';
             if (esRechazada) {
-                if (esDobleCobro) {
-                    escenarioCobro = 'FALSO_RECHAZO_PAGADO';
-                    situacionCobroLabel = 'Falso Rechazo (Pagó Salud + Desc. Funcionario)';
-                } else if (esFalsoRechazoPagado) {
-                    escenarioCobro = 'FALSO_RECHAZO_PAGADO';
-                    situacionCobroLabel = 'Falso Rechazo (Pagado por Salud en BCI)';
-                } else if (esFalsoRechazoCompin && pagado === 0) {
-                    escenarioCobro = 'RECHAZADA_RECUPERABLE';
-                    situacionCobroLabel = 'Falso Rechazo (Autorizada en COMPIN - Sin Pago)';
-                } else if (tieneSaldoPendiente) {
+                if (tieneSaldoPendienteRech) {
                     if (esVigente) {
                         escenarioCobro = 'RECHAZADA_RECUPERABLE';
                         situacionCobroLabel = pagadoDesc > 0
@@ -760,22 +865,40 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                     }
                 } else {
                     escenarioCobro = 'RECHAZADA_RECUPERADA';
-                    situacionCobroLabel = 'Rechazada Recuperada (Descuento / Devolución)';
+                    situacionCobroLabel = 'Rechazada Recuperada (Descuento Remun.)';
                 }
-            } else if (estimado > pagado) {
+            } else if (esSaldada) {
+                escenarioCobro = 'PAGADA';
+                if (esAutPorPago) {
+                    situacionCobroLabel = 'Saldada (Autorizada por Pago Inst. Salud)';
+                } else if (esFonasa && numDias <= 3) {
+                    situacionCobroLabel = 'Saldada (FONASA ≤ 3 días con Aporte)';
+                } else if (esFonasa && numDias > 3) {
+                    situacionCobroLabel = 'Saldada (FONASA > 3 días con Aporte + Subsidio)';
+                } else {
+                    situacionCobroLabel = 'Saldada (Inst. Salud con Pago)';
+                }
+            } else {
                 escenarioCobro = 'POR_COBRAR_SALUD';
-                situacionCobroLabel = pagado === 0 ? 'Por Cobrar Salud ($0)' : 'Por Cobrar Salud (Pago Parcial)';
-            } else if (pagado === 0) {
-                escenarioCobro = 'SIN_PAGO';
-                situacionCobroLabel = 'Sin Pago ($0)';
+                if (pagadoSalud === 0) {
+                    situacionCobroLabel = 'Por Cobrar Inst. Salud ($0)';
+                } else if (esFonasa && numDias > 3 && pagadoAporte > 0 && pagadoSubsidio === 0) {
+                    situacionCobroLabel = 'Por Cobrar Inst. Salud (FONASA > 3d solo Aporte)';
+                } else if (esFonasa && numDias > 3 && pagadoSubsidio > 0 && pagadoAporte === 0) {
+                    situacionCobroLabel = 'Por Cobrar Inst. Salud (FONASA > 3d solo Subsidio)';
+                } else {
+                    situacionCobroLabel = 'Por Cobrar Inst. Salud (Pago Parcial)';
+                }
             }
 
             return {
                 ...r,
                 Vigencia: esVigente ? 'S' : 'N',
                 VigenciaLabel: esVigente ? 'Vigente' : 'No Vigente',
-                EsFalsoRechazoPagado: esFalsoRechazoPagado,
-                EsDobleCobro: esDobleCobro,
+                EsSaldadaSalud: esSaldada,
+                EsAutorizadaPorPagoSalud: esAutPorPago,
+                EsFalsoRechazoPagado: esAutPorPago,
+                EsDobleCobro: false,
                 EsFalsoRechazoCompin: esFalsoRechazoCompin,
                 EscenarioCobro: escenarioCobro,
                 SituacionCobroLabel: situacionCobroLabel,
@@ -869,26 +992,57 @@ app.get('/api/dashboard/stats', async (req, res) => {
             reqDb.input('TipoAlta', sql.VarChar, tipoAlta);
         }
 
+        const dpStatsJoin = `
+            LEFT JOIN (
+                SELECT
+                    NumeroLicencia,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) = 'Aporte' AND ISNULL(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantAporte,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') AND ISNULL(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantSubsidio
+                FROM LIC_DETALLE_PAGO_ACTUAL
+                GROUP BY NumeroLicencia
+            ) DP ON DP.NumeroLicencia = L.NumeroLicencia
+        `;
+        const montoBaseStatsExpr = `CASE WHEN ISNULL(L.PagoEstimado, 0) > 0 THEN ISNULL(L.PagoEstimado, 0) ELSE ISNULL(L.MontoDesc, 0) END`;
+        const pagadoStatsExpr = `
+            CASE
+                WHEN ISNULL(L.Rechazo, 0) = 1 THEN 0
+                WHEN ${modulo === 'reposo' ? '1 = 0' : "(ISNULL(S.Descripcion, '') LIKE '%FONASA%' OR S.CodSalud = 41)"} THEN
+                    CASE
+                        WHEN ISNULL(L.NumDias, 0) <= 3 AND ISNULL(DP.CantAporte, 0) > 0 THEN 1
+                        WHEN ISNULL(L.NumDias, 0) > 3 AND ISNULL(DP.CantAporte, 0) > 0 AND ISNULL(DP.CantSubsidio, 0) > 0 THEN 1
+                        ELSE 0
+                    END
+                ELSE
+                    CASE
+                        WHEN ISNULL(DP.CantAporte, 0) > 0 OR ISNULL(DP.CantSubsidio, 0) > 0 THEN 1
+                        ELSE 0
+                    END
+            END
+        `;
+
         const buildQuery = (extraCondition) => `
             SELECT COUNT(*) as Cantidad, SUM(CAST(PagoEstimado AS BIGINT)) as TotalMonto
             FROM (
-                SELECT L.NumeroLicencia, MAX(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) AS PagoEstimado
+                SELECT L.NumeroLicencia,
+                       MAX(${montoBaseStatsExpr}) AS PagoEstimado,
+                       MAX(${pagadoStatsExpr}) AS Pagado
                 ${baseFromAndJoins}
+                ${dpStatsJoin}
                 WHERE RTRIM(ISNULL(L.PagoDirecto, '')) ${condition}
                 ${filters}
-                ${extraCondition}
                 GROUP BY L.NumeroLicencia
             ) T
+            ${extraCondition}
         `;
 
         // 1. Universo de licencias a evaluar
         const qUniverso = await reqDb.query(buildQuery(""));
 
-        // 2. Licencias pagadas
-        const qPagadas = await reqDb.query(buildQuery("AND EXISTS (SELECT 1 FROM LIC_DETALLE_PAGO_ACTUAL b WHERE b.NumeroLicencia = L.NumeroLicencia)"));
+        // 2. Licencias pagadas (Saldadas según regla FONASA / Inst. de Salud)
+        const qPagadas = await reqDb.query(buildQuery("WHERE Pagado = 1"));
 
-        // 3. Licencias NO pagadas (Impagas)
-        const qNoPagadas = await reqDb.query(buildQuery("AND NOT EXISTS (SELECT 1 FROM LIC_DETALLE_PAGO_ACTUAL b WHERE b.NumeroLicencia = L.NumeroLicencia)"));
+        // 3. Licencias NO pagadas (Impagas / Pendientes de cobro o rechazadas)
+        const qNoPagadas = await reqDb.query(buildQuery("WHERE Pagado = 0"));
 
         // 4. Agrupación por Sector
         const qSector = await reqDb.query(`
@@ -901,11 +1055,11 @@ app.get('/api/dashboard/stats', async (req, res) => {
                    SUM(CAST(CASE WHEN Pagado = 0 THEN PagoEstimado ELSE 0 END AS BIGINT)) as ImpagasMonto
             FROM (
                 SELECT L.NumeroLicencia, 
-                       MAX(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) AS PagoEstimado,
+                       MAX(${montoBaseStatsExpr}) AS PagoEstimado,
                        MAX(CASE WHEN ISNULL(F.CodUnidad, 0) < 600 THEN 'Educación' ELSE 'Salud' END) as GroupLabel,
-                       MAX(CASE WHEN DP.NumeroLicencia IS NOT NULL THEN 1 ELSE 0 END) as Pagado
+                       MAX(${pagadoStatsExpr}) as Pagado
                 ${baseFromAndJoins}
-                LEFT JOIN (SELECT DISTINCT NumeroLicencia FROM LIC_DETALLE_PAGO_ACTUAL) DP ON DP.NumeroLicencia = L.NumeroLicencia
+                ${dpStatsJoin}
                 WHERE RTRIM(ISNULL(L.PagoDirecto, '')) ${condition}
                 ${filters}
                 GROUP BY L.NumeroLicencia
@@ -924,11 +1078,11 @@ app.get('/api/dashboard/stats', async (req, res) => {
                    SUM(CAST(CASE WHEN Pagado = 0 THEN PagoEstimado ELSE 0 END AS BIGINT)) as ImpagasMonto
             FROM (
                 SELECT L.NumeroLicencia, 
-                       MAX(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) AS PagoEstimado,
+                       MAX(${montoBaseStatsExpr}) AS PagoEstimado,
                        MAX(ISNULL(${modulo === 'reposo' ? "RTRIM(L.PagoDirecto)" : "S.Descripcion"}, 'Sin Entidad')) as GroupLabel,
-                       MAX(CASE WHEN DP.NumeroLicencia IS NOT NULL THEN 1 ELSE 0 END) as Pagado
+                       MAX(${pagadoStatsExpr}) as Pagado
                 ${baseFromAndJoins}
-                LEFT JOIN (SELECT DISTINCT NumeroLicencia FROM LIC_DETALLE_PAGO_ACTUAL) DP ON DP.NumeroLicencia = L.NumeroLicencia
+                ${dpStatsJoin}
                 WHERE RTRIM(ISNULL(L.PagoDirecto, '')) ${condition}
                 ${filters}
                 GROUP BY L.NumeroLicencia
@@ -948,10 +1102,10 @@ app.get('/api/dashboard/stats', async (req, res) => {
             FROM (
                 SELECT L.NumeroLicencia,
                        MAX(MONTH(${campoFecha})) as MesNum,
-                       MAX(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) AS PagoEstimado,
-                       MAX(CASE WHEN DP.NumeroLicencia IS NOT NULL THEN 1 ELSE 0 END) as Pagado
+                       MAX(${montoBaseStatsExpr}) AS PagoEstimado,
+                       MAX(${pagadoStatsExpr}) as Pagado
                 ${baseFromAndJoins}
-                LEFT JOIN (SELECT DISTINCT NumeroLicencia FROM LIC_DETALLE_PAGO_ACTUAL) DP ON DP.NumeroLicencia = L.NumeroLicencia
+                ${dpStatsJoin}
                 WHERE RTRIM(ISNULL(L.PagoDirecto, '')) ${condition}
                 ${filters}
                 GROUP BY L.NumeroLicencia
@@ -1080,12 +1234,14 @@ app.get('/api/dashboard/advanced-stats', async (req, res) => {
 
         const baseWhere = `WHERE RTRIM(ISNULL(L.PagoDirecto, '')) ${condition} ${filters}`;
 
+        const montoBaseAdvExpr = `CASE WHEN ISNULL(L.PagoEstimado, 0) > 0 THEN ISNULL(L.PagoEstimado, 0) ELSE ISNULL(L.MontoDesc, 0) END`;
+
         // 1. Evolucion Mensual
         const qEvolucion = await reqDb.query(`
             SELECT 
                 MONTH(L.Desde) as Mes,
                 COUNT(DISTINCT L.NumeroLicencia) as Cantidad,
-                SUM(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) as TotalMonto
+                SUM(${montoBaseAdvExpr}) as TotalMonto
             ${baseFromAndJoins}
             ${baseWhere}
             GROUP BY MONTH(L.Desde)
@@ -1130,7 +1286,7 @@ app.get('/api/dashboard/advanced-stats', async (req, res) => {
             SELECT TOP 10
                 ISNULL(RTRIM(E.Descripcion), 'Sin Establecimiento') as Establecimiento,
                 COUNT(DISTINCT L.NumeroLicencia) as Cantidad,
-                SUM(ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) as TotalMonto
+                SUM(${montoBaseAdvExpr}) as TotalMonto
             ${baseFromAndJoins}
             ${baseWhere}
             GROUP BY ISNULL(RTRIM(E.Descripcion), 'Sin Establecimiento')
@@ -1199,7 +1355,7 @@ app.get('/api/licencias/detalle', async (req, res) => {
                 L.Recepcion, L.Desde, L.Hasta, L.NumeroLicencia, L.Maternal, L.Parcial, 
                 L.Rechazo, L.Observacion, L.Observacion_Compin, L.Estado, L.Autorizada, L.Obser_apelacion, L.Compin, 
                 L.Apelacion, L.Tipo_enferm, L.MontoDesc, L.regularizado, 
-                (ISNULL(L.PagoEstimado, 0) + ISNULL(L.MontoDesc, 0)) AS PagoEstimado, 
+                (CASE WHEN ISNULL(L.PagoEstimado, 0) > 0 THEN ISNULL(L.PagoEstimado, 0) ELSE ISNULL(L.MontoDesc, 0) END) AS PagoEstimado, 
                 L.Descuento, 
                 L.TipoLic, 
                 YEAR(${campoFecha}) AS año, 
@@ -1226,6 +1382,14 @@ app.get('/api/licencias/detalle', async (req, res) => {
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             LEFT JOIN LIC_SALUD S ON COALESCE(HPA.CodSalud, TRY_CAST(F.UltimaPrev AS INT)) = S.CodSalud
             LEFT JOIN LIC_PREVISION P ON HPA.CodPrevision = P.CodPrevision
+            LEFT JOIN (
+                SELECT
+                    NumeroLicencia,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) = 'Aporte' AND ISNULL(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantAporte,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) NOT IN ('Aporte', 'Descuento', 'Devolucion') AND ISNULL(Monto, 0) > 0 THEN 1 ELSE 0 END) as CantSubsidio
+                FROM LIC_DETALLE_PAGO_ACTUAL
+                GROUP BY NumeroLicencia
+            ) DP ON DP.NumeroLicencia = L.NumeroLicencia
             WHERE RTRIM(ISNULL(L.PagoDirecto, '')) ${condition}
         `;
 
@@ -1280,11 +1444,28 @@ app.get('/api/licencias/detalle', async (req, res) => {
             request.input('TipoAlta', sql.VarChar, tipoAlta);
         }
 
+        const pagadoDetalleExpr = `
+            CASE
+                WHEN ISNULL(L.Rechazo, 0) = 1 THEN 0
+                WHEN ${modulo === 'reposo' ? '1 = 0' : "(ISNULL(S.Descripcion, '') LIKE '%FONASA%' OR S.CodSalud = 41)"} THEN
+                    CASE
+                        WHEN ISNULL(L.NumDias, 0) <= 3 AND ISNULL(DP.CantAporte, 0) > 0 THEN 1
+                        WHEN ISNULL(L.NumDias, 0) > 3 AND ISNULL(DP.CantAporte, 0) > 0 AND ISNULL(DP.CantSubsidio, 0) > 0 THEN 1
+                        ELSE 0
+                    END
+                ELSE
+                    CASE
+                        WHEN ISNULL(DP.CantAporte, 0) > 0 OR ISNULL(DP.CantSubsidio, 0) > 0 THEN 1
+                        ELSE 0
+                    END
+            END
+        `;
+
         // Condición para el tipo de detalle
         if (type === 'pagadas') {
-            query += ` AND EXISTS (SELECT 1 FROM LIC_DETALLE_PAGO_ACTUAL b WHERE b.NumeroLicencia = L.NumeroLicencia) `;
+            query += ` AND (${pagadoDetalleExpr}) = 1 `;
         } else if (type === 'impagas') {
-            query += ` AND NOT EXISTS (SELECT 1 FROM LIC_DETALLE_PAGO_ACTUAL b WHERE b.NumeroLicencia = L.NumeroLicencia) `;
+            query += ` AND (${pagadoDetalleExpr}) = 0 `;
         }
 
         query += `
@@ -1536,6 +1717,9 @@ app.get('/api/info-gestion/pago-licencias', async (req, res) => {
             reqDb.input('RutFiltro', sql.VarChar, rutFiltro);
         }
 
+        const montoBaseLicExpr = `(CASE WHEN ISNULL(L.PagoEstimado, 0) > 0 THEN ISNULL(L.PagoEstimado, 0) ELSE ISNULL(L.MontoDesc, 0) END)`;
+        const montoRecupExpr = `(CASE WHEN ISNULL(L.Rechazo, 0) = 1 THEN (CASE WHEN ISNULL(Detalle.MontoDevolucion, 0) = 0 AND ISNULL(Detalle.MontoSalud, 0) = 0 THEN ISNULL(Detalle.MontoDescuento, 0) ELSE 0 END) ELSE ISNULL(Detalle.MontoSalud, 0) END)`;
+
         const query = `
             SELECT 
                 P.[RUT EMPLEADO] AS Rut, 
@@ -1551,15 +1735,20 @@ app.get('/api/info-gestion/pago-licencias', async (req, res) => {
                 L.NumDias,
                 L.Obser_apelacion,
                 ISNULL(L.MontoDesc, 0) AS MontoDesc,
-                ISNULL(L.PagoEstimado, 0) AS PagoEstimado,
-                ISNULL(Detalle.TotalMonto, ISNULL(L.MontoDesc, 0)) AS PagoRecuperado,
-                (ISNULL(L.PagoEstimado, 0) - ISNULL(Detalle.TotalMonto, ISNULL(L.MontoDesc, 0))) AS PagoPorRecuperar,
+                ${montoBaseLicExpr} AS PagoEstimado,
+                ${montoRecupExpr} AS PagoRecuperado,
+                (CASE WHEN ${montoBaseLicExpr} > ${montoRecupExpr} THEN ${montoBaseLicExpr} - ${montoRecupExpr} ELSE 0 END) AS PagoPorRecuperar,
                 (ISNULL(CAST(REPLACE(P.[TOT HABERES], ',', '.') AS FLOAT), 0) - ISNULL(CAST(REPLACE(P.[TOT DESCTOS], ',', '.') AS FLOAT), 0)) AS Liquidez,
-                Detalle.NumPagos
+                ISNULL(Detalle.NumPagos, 0) AS NumPagos
             FROM dbo.LIC_LICENCIA_ACTUAL L
             INNER JOIN dbo.Personal P ON L.RutFuncionario = P.[RUT EMPLEADO]
             LEFT JOIN (
-                SELECT NumeroLicencia, SUM(Monto) as TotalMonto, COUNT(*) as NumPagos
+                SELECT 
+                    NumeroLicencia, 
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) = 'Descuento' THEN ISNULL(Monto, 0) ELSE 0 END) as MontoDescuento,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) = 'Devolucion' THEN ISNULL(Monto, 0) ELSE 0 END) as MontoDevolucion,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) NOT IN ('Descuento', 'Devolucion') THEN ISNULL(Monto, 0) ELSE 0 END) as MontoSalud,
+                    SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) <> 'Devolucion' THEN 1 ELSE 0 END) as NumPagos
                 FROM dbo.LIC_DETALLE_PAGO_ACTUAL
                 GROUP BY NumeroLicencia
             ) Detalle ON L.NumeroLicencia = Detalle.NumeroLicencia
