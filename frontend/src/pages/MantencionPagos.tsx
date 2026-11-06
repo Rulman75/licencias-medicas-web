@@ -124,9 +124,13 @@ export default function MantencionPagos() {
       const res = await fetch(`/api/mantencion/cheque?banco=${encodeURIComponent(b)}&num=${encodeURIComponent(n)}`);
       const data = await res.json();
       if (res.ok) {
+        const movs = data.movimientos || [];
         setSaldoCheque(data.sumaOcupada || 0);
         setCantDocsCheque(data.cantidad || 0);
-        setMovimientosCheque(data.movimientos || []);
+        setMovimientosCheque(movs);
+        if (movs.length > 0) {
+          setMostrarMovsCheque(true);
+        }
         // Sincronizar con el formulario de pago abajo
         setBancoPago(b);
         setNumDocPago(n);
@@ -205,6 +209,43 @@ export default function MantencionPagos() {
     setChequeEncontrado(false);
     setMovimientosCheque([]);
     setMostrarMovsCheque(false);
+  };
+
+  const eliminarChequeActual = async () => {
+    const b = bancoCheque.trim();
+    const n = numCheque.trim();
+    if (!b || !n || !chequeEncontrado) {
+      mostrarAlerta('error', 'Primero busque una Transferencia registrada para poder eliminarla');
+      return;
+    }
+    if (movimientosCheque.length > 0) {
+      mostrarAlerta(
+        'error',
+        `La transferencia #${n} tiene ${movimientosCheque.length} pago(s) imputado(s). Elimine primero los pagos asociados en la tabla inferior.`
+      );
+      setMostrarMovsCheque(true);
+      return;
+    }
+    if (!window.confirm(`¿Está seguro de eliminar el registro de la Transferencia #${n} (${b})?`)) {
+      return;
+    }
+    setCargando(true);
+    try {
+      const res = await fetch(`/api/mantencion/cheque?banco=${encodeURIComponent(b)}&num=${encodeURIComponent(n)}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (res.ok) {
+        mostrarAlerta('ok', data.message || 'Transferencia eliminada correctamente');
+        limpiarCheque();
+      } else {
+        mostrarAlerta('error', data.error || 'No se pudo eliminar la transferencia');
+      }
+    } catch {
+      mostrarAlerta('error', 'Error de red eliminando transferencia');
+    } finally {
+      setCargando(false);
+    }
   };
 
   // Buscar Funcionario por RUT
@@ -403,10 +444,26 @@ export default function MantencionPagos() {
     }
   };
 
+  // Seleccionar un movimiento de pago existente y cargar sus datos en el formulario (Sección 3)
+  const seleccionarPagoParaEdicion = (d: DetallePago) => {
+    setPagoSeleccionado(d);
+    if (d.Banco) setBancoPago(d.Banco.trim());
+    if (d.NumeroDocumento) setNumDocPago(d.NumeroDocumento.trim());
+    if (d.FechaDepCtaCte) setFechaDocPago(d.FechaDepCtaCte);
+    if (d.Recepcion) setFechaRecepcionPago(d.Recepcion);
+    if (d.Concepto) setConceptoPago(d.Concepto.trim());
+    if (d.DiasPagados !== undefined) setDiasPagados(String(d.DiasPagados));
+    if (d.Desde) setDesdePago(d.Desde);
+    if (d.Hasta) setHastaPago(d.Hasta);
+    if (d.Monto !== undefined) setMontoPago(String(d.Monto));
+    setObservacionPago(d.Observacion || '');
+  };
+
   // Modificar Concepto de un pago seleccionado (Button3 en Frm_IngresoPago.vb)
   const actualizarConceptoPago = async () => {
-    if (!pagoSeleccionado?.Correlativo) {
-      mostrarAlerta('error', 'Seleccione primero una fila en la tabla de Pagos de la Licencia');
+    const target = pagoSeleccionado || (detallePagosLicencia.length === 1 ? detallePagosLicencia[0] : null);
+    if (!target?.Correlativo) {
+      mostrarAlerta('error', 'Seleccione primero una fila en la tabla de Pagos de la Licencia (Sección 4)');
       return;
     }
     try {
@@ -414,7 +471,7 @@ export default function MantencionPagos() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          correlativo: pagoSeleccionado.Correlativo,
+          correlativo: target.Correlativo,
           concepto: conceptoPago
         })
       });
@@ -431,24 +488,61 @@ export default function MantencionPagos() {
   };
 
   // Eliminar un movimiento de pago individual (Button10 en Frm_IngresoPago.vb)
-  const eliminarPagoIndividual = async (correlativoParam?: number) => {
-    const corr = correlativoParam || pagoSeleccionado?.Correlativo;
-    if (!corr) {
-      mostrarAlerta('error', 'Seleccione un pago de la tabla para eliminarlo');
+  const eliminarPagoIndividual = async (pagoOrCorrelativo?: DetallePago | number) => {
+    let targetObj: DetallePago | null = null;
+    if (typeof pagoOrCorrelativo === 'object' && pagoOrCorrelativo !== null) {
+      targetObj = pagoOrCorrelativo;
+    } else if (typeof pagoOrCorrelativo === 'number') {
+      targetObj =
+        detallePagosLicencia.find(d => d.Correlativo === pagoOrCorrelativo) ||
+        movimientosCheque.find(m => m.Correlativo === pagoOrCorrelativo) ||
+        ({ Correlativo: pagoOrCorrelativo } as DetallePago);
+    } else if (pagoSeleccionado) {
+      targetObj = pagoSeleccionado;
+    } else if (detallePagosLicencia.length === 1) {
+      targetObj = detallePagosLicencia[0];
+    }
+
+    if (!targetObj) {
+      if (detallePagosLicencia.length > 1) {
+        mostrarAlerta(
+          'error',
+          `Esta licencia tiene ${detallePagosLicencia.length} pagos registrados. Haga clic en una fila de la Sección 4 (o directamente en su botón "Eliminar Pago") para elegir cuál eliminar.`
+        );
+      } else {
+        mostrarAlerta('error', 'Seleccione primero un pago en la tabla (Sección 4 o Sección 1) para eliminarlo');
+      }
       return;
     }
-    if (!window.confirm('¿Está seguro de eliminar este registro de pago? Se descontará del total pagado y del saldo de la transferencia.')) {
+
+    const corr = targetObj.Correlativo || 0;
+    const descMonto = targetObj.Monto !== undefined ? ` por $${Number(targetObj.Monto || 0).toLocaleString('es-CL')}` : '';
+    const descLic = targetObj.NumeroLicencia || licenciaActiva?.NumeroLicencia || '';
+
+    if (
+      !window.confirm(
+        `¿Está seguro de eliminar este ingreso de pago${descMonto} (${targetObj.Concepto || 'Pago'})${descLic ? ` de la licencia #${descLic}` : ''}?\n\nSe descontará automáticamente del Total Pagado de la licencia y del Saldo Ocupado de la transferencia.`
+      )
+    ) {
       return;
     }
+
     setCargando(true);
     try {
-      const res = await fetch(`/api/mantencion/pago/${corr}`, { method: 'DELETE' });
+      const qs = new URLSearchParams({
+        numeroLicencia: String(targetObj.NumeroLicencia || licenciaActiva?.NumeroLicencia || ''),
+        numeroDocumento: String(targetObj.NumeroDocumento || ''),
+        monto: String(targetObj.Monto || 0),
+        diasPagados: String(targetObj.DiasPagados || 0)
+      });
+      const res = await fetch(`/api/mantencion/pago/${corr}?${qs.toString()}`, { method: 'DELETE' });
       const data = await res.json();
       if (res.ok) {
-        mostrarAlerta('ok', data.message);
+        mostrarAlerta('ok', data.message || 'Pago eliminado correctamente');
         setPagoSeleccionado(null);
-        if (licenciaActiva?.NumeroLicencia) {
-          await buscarLicenciaParaPago(licenciaActiva.NumeroLicencia);
+        const licRefrescar = licenciaActiva?.NumeroLicencia || targetObj.NumeroLicencia;
+        if (licRefrescar) {
+          await buscarLicenciaParaPago(licRefrescar);
         }
         if (numCheque.trim() && bancoCheque.trim()) {
           await buscarCheque(bancoCheque, numCheque);
@@ -717,6 +811,18 @@ export default function MantencionPagos() {
               {chequeEncontrado ? 'Actualizar Transferencia' : 'Registrar Transferencia'}
             </button>
 
+            {chequeEncontrado && (
+              <button
+                type="button"
+                onClick={eliminarChequeActual}
+                disabled={cargando}
+                className="px-3.5 py-2 bg-rose-600 text-white text-xs font-semibold rounded-lg hover:bg-rose-700"
+                title="Eliminar esta transferencia (solo si no tiene pagos imputados)"
+              >
+                🗑️ Eliminar Transferencia
+              </button>
+            )}
+
             {movimientosCheque.length > 0 && (
               <>
                 <button
@@ -742,9 +848,9 @@ export default function MantencionPagos() {
           </div>
         </div>
 
-        {/* Tabla desplegable con los movimientos asociados al cheque actual */}
+        {/* Tabla desplegable con los movimientos asociados a la transferencia actual */}
         {mostrarMovsCheque && movimientosCheque.length > 0 && (
-          <div className="mt-3 border border-[#e2e8f0] rounded-xl overflow-x-auto max-h-[240px]">
+          <div className="mt-3 border border-[#e2e8f0] rounded-xl overflow-x-auto max-h-[260px]">
             <table className="w-full text-left text-xs">
               <thead className="bg-[#f1f5f9] text-[#475569] sticky top-0">
                 <tr>
@@ -757,13 +863,17 @@ export default function MantencionPagos() {
                   <th className="p-2">Hasta</th>
                   <th className="p-2">Cenco</th>
                   <th className="p-2">Observación</th>
+                  <th className="p-2 text-center">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#e2e8f0]">
-                {movimientosCheque.map(m => (
+                {movimientosCheque.map((m, idx) => (
                   <tr
-                    key={m.Correlativo}
-                    onClick={() => buscarLicenciaParaPago(m.NumeroLicencia)}
+                    key={m.Correlativo || idx}
+                    onClick={async () => {
+                      await buscarLicenciaParaPago(m.NumeroLicencia);
+                      seleccionarPagoParaEdicion(m);
+                    }}
                     className="hover:bg-[#f8fafc] cursor-pointer"
                   >
                     <td className="p-2">{m.Correlativo}</td>
@@ -775,6 +885,19 @@ export default function MantencionPagos() {
                     <td className="p-2">{formatDateDDMMYYYY(m.Hasta)}</td>
                     <td className="p-2">{m.Cenco}</td>
                     <td className="p-2">{m.Observacion}</td>
+                    <td className="p-2 text-center">
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          eliminarPagoIndividual(m);
+                        }}
+                        className="px-2.5 py-1 bg-rose-600 text-white rounded-md hover:bg-rose-700 text-[11px] font-bold shadow-xs"
+                        title="Eliminar este ingreso de pago"
+                      >
+                        🗑️ Eliminar Pago
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -954,9 +1077,37 @@ export default function MantencionPagos() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Formulario de Ingreso de Pago (5 cols) */}
         <div className="lg:col-span-5 bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-5 space-y-4">
-          <h2 className="text-sm font-bold text-[#016098] uppercase tracking-wider border-b border-[#f1f5f9] pb-2">
-            3. Imputar Movimiento de Pago a la Licencia
-          </h2>
+          <div className="flex items-center justify-between border-b border-[#f1f5f9] pb-2">
+            <h2 className="text-sm font-bold text-[#016098] uppercase tracking-wider">
+              3. Imputar Movimiento de Pago a la Licencia
+            </h2>
+            {pagoSeleccionado && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPagoSeleccionado(null);
+                  setMontoPago('');
+                  setObservacionPago('');
+                }}
+                className="text-[11px] font-bold text-[#016098] hover:underline"
+              >
+                + Limpiar selección (Nuevo Pago)
+              </button>
+            )}
+          </div>
+
+          {pagoSeleccionado && (
+            <div className="p-2.5 bg-sky-50 border border-sky-200 rounded-lg text-xs text-sky-900 flex items-center justify-between gap-2">
+              <div>
+                <span className="font-bold">Pago Seleccionado #{pagoSeleccionado.Correlativo || 'S/N'}:</span>{' '}
+                {pagoSeleccionado.Concepto} por{' '}
+                <span className="font-bold text-emerald-700">
+                  ${Number(pagoSeleccionado.Monto || 0).toLocaleString('es-CL')}
+                </span>{' '}
+                ({pagoSeleccionado.DiasPagados} días — Transf. #{pagoSeleccionado.NumeroDocumento})
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1082,23 +1233,25 @@ export default function MantencionPagos() {
               Grabar Pago en Licencia
             </button>
 
-            {pagoSeleccionado && (
-              <>
-                <button
-                  onClick={actualizarConceptoPago}
-                  className="px-3 py-2.5 bg-[#39BABD] text-white text-xs font-semibold rounded-lg hover:bg-[#2da1a4]"
-                  title="Actualiza el Concepto del pago seleccionado en la tabla"
-                >
-                  Cambiar Concepto (#{pagoSeleccionado.Correlativo})
-                </button>
-                <button
-                  onClick={() => eliminarPagoIndividual(pagoSeleccionado.Correlativo)}
-                  className="px-3 py-2.5 bg-[#EB567F] text-white text-xs font-semibold rounded-lg hover:bg-[#d6416a]"
-                >
-                  Eliminar Pago
-                </button>
-              </>
-            )}
+            <button
+              type="button"
+              onClick={actualizarConceptoPago}
+              disabled={cargando || detallePagosLicencia.length === 0}
+              className="px-3 py-2.5 bg-[#39BABD] text-white text-xs font-semibold rounded-lg hover:bg-[#2da1a4] disabled:opacity-40"
+              title="Actualiza el Concepto del pago seleccionado en la tabla"
+            >
+              {pagoSeleccionado?.Correlativo ? `Cambiar Concepto (#${pagoSeleccionado.Correlativo})` : 'Cambiar Concepto'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => eliminarPagoIndividual()}
+              disabled={cargando || detallePagosLicencia.length === 0}
+              className="px-3.5 py-2.5 bg-rose-600 text-white text-xs font-bold rounded-lg hover:bg-rose-700 disabled:opacity-40 shadow-sm"
+              title="Elimina el movimiento de pago seleccionado en la tabla"
+            >
+              🗑️ {pagoSeleccionado?.Correlativo ? `Eliminar Pago (#${pagoSeleccionado.Correlativo})` : 'Eliminar Pago'}
+            </button>
           </div>
         </div>
 
@@ -1177,7 +1330,7 @@ export default function MantencionPagos() {
                 </div>
               )}
             </div>
-            <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[240px]">
+            <div className="overflow-x-auto border border-[#e2e8f0] rounded-xl max-h-[260px]">
               <table className="w-full text-left text-xs">
                 <thead className="bg-[#f1f5f9] text-[#475569] font-semibold sticky top-0">
                   <tr>
@@ -1201,16 +1354,15 @@ export default function MantencionPagos() {
                       </td>
                     </tr>
                   ) : (
-                    detallePagosLicencia.map(d => {
-                      const isSel = pagoSeleccionado?.Correlativo === d.Correlativo;
+                    detallePagosLicencia.map((d, idx) => {
+                      const isSel =
+                        pagoSeleccionado === d ||
+                        (Boolean(d.Correlativo) && pagoSeleccionado?.Correlativo === d.Correlativo);
                       return (
                         <tr
-                          key={d.Correlativo}
-                          onClick={() => {
-                            setPagoSeleccionado(d);
-                            if (d.Concepto) setConceptoPago(d.Concepto);
-                          }}
-                          className={`cursor-pointer ${isSel ? 'bg-sky-50 font-semibold' : 'hover:bg-[#f8fafc]'}`}
+                          key={d.Correlativo || idx}
+                          onClick={() => seleccionarPagoParaEdicion(d)}
+                          className={`cursor-pointer ${isSel ? 'bg-sky-50 font-semibold ring-1 ring-inset ring-sky-300' : 'hover:bg-[#f8fafc]'}`}
                         >
                           <td className="p-2">{d.Correlativo}</td>
                           <td className="p-2 font-bold text-[#016098]">{d.NumeroDocumento}</td>
@@ -1228,11 +1380,12 @@ export default function MantencionPagos() {
                               type="button"
                               onClick={e => {
                                 e.stopPropagation();
-                                eliminarPagoIndividual(d.Correlativo);
+                                eliminarPagoIndividual(d);
                               }}
-                              className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded hover:bg-rose-200 text-[11px] font-bold"
+                              className="px-2.5 py-1 bg-rose-600 text-white rounded-md hover:bg-rose-700 text-[11px] font-bold shadow-xs"
+                              title="Eliminar este ingreso de pago"
                             >
-                              Eliminar
+                              🗑️ Eliminar Pago
                             </button>
                           </td>
                         </tr>

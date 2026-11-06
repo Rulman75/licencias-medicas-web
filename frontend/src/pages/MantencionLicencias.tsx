@@ -1555,11 +1555,12 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
                     <th className="p-2">Hasta</th>
                     <th className="p-2 text-right">Monto ($)</th>
                     <th className="p-2">Observación</th>
+                    <th className="p-2 text-center">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-emerald-100">
-                  {detallePagosLic.map(p => (
-                    <tr key={p.Correlativo} className="hover:bg-emerald-50/40">
+                  {detallePagosLic.map((p, idx) => (
+                    <tr key={p.Correlativo || idx} className="hover:bg-emerald-50/40">
                       <td className="p-2 font-semibold text-[#016098]">{p.NumeroDocumento || '-'}</td>
                       <td className="p-2">{p.Banco || '-'}</td>
                       <td className="p-2">{formatDateDDMMYYYY(p.FechaDepCtaCte)}</td>
@@ -1575,6 +1576,43 @@ export default function MantencionLicencias({ modo = 'normal' }: MantencionLicen
                         ${Number(p.Monto || 0).toLocaleString('es-CL')}
                       </td>
                       <td className="p-2 text-[#475569]">{p.Observacion || '-'}</td>
+                      <td className="p-2 text-center">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (
+                              !window.confirm(
+                                `¿Está seguro de eliminar este ingreso de pago por $${Number(p.Monto || 0).toLocaleString('es-CL')} (${p.Concepto || 'Subsidio'}) de la licencia #${numeroLicencia}?`
+                              )
+                            ) {
+                              return;
+                            }
+                            try {
+                              const qs = new URLSearchParams({
+                                numeroLicencia: String(numeroLicencia || ''),
+                                numeroDocumento: String(p.NumeroDocumento || ''),
+                                monto: String(p.Monto || 0),
+                                diasPagados: String(p.DiasPagados || 0)
+                              });
+                              const res = await fetch(`/api/mantencion/pago/${p.Correlativo || 0}?${qs.toString()}`, {
+                                method: 'DELETE'
+                              });
+                              const data = await res.json();
+                              if (res.ok) {
+                                mostrarAlerta('ok', data.message || 'Pago eliminado correctamente');
+                                await buscarLicenciaPorNumero(numeroLicencia);
+                              } else {
+                                mostrarAlerta('error', data.error || 'No se pudo eliminar el pago');
+                              }
+                            } catch {
+                              mostrarAlerta('error', 'Error de red eliminando pago');
+                            }
+                          }}
+                          className="px-2.5 py-1 bg-rose-600 text-white rounded-md hover:bg-rose-700 text-[11px] font-bold"
+                        >
+                          🗑️ Eliminar Pago
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

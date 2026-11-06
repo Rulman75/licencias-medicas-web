@@ -533,7 +533,7 @@ router.get('/licencia/:numero', async (req, res) => {
             .query(`
                 SELECT 
                     Correlativo,
-                    RTRIM(ISNULL(CONVERT(varchar(50), NumeroLicencia), '')) as NumeroLicencia,
+                    RTRIM(ISNULL(CAST(NumeroLicencia AS VARCHAR(50)), '')) as NumeroLicencia,
                     RTRIM(ISNULL(NumeroDocumento, '')) as NumeroDocumento,
                     CONVERT(varchar, FechaDepCtaCte, 23) as FechaDepCtaCte,
                     ISNULL(DiasPagados, 0) as DiasPagados,
@@ -546,7 +546,7 @@ router.get('/licencia/:numero', async (req, res) => {
                     RTRIM(ISNULL(Banco, '')) as Banco,
                     RTRIM(ISNULL(cenco, '')) as Cenco
                 FROM LIC_DETALLE_PAGO_ACTUAL
-                WHERE NumeroLicencia = @Num
+                WHERE RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) = @Num
                 ORDER BY Correlativo DESC
             `);
 
@@ -565,8 +565,10 @@ router.get('/licencia/:numero', async (req, res) => {
             else if (c === 'Descuento') diasDescuento += dp;
             else if (c === 'Aporte') diasAporte += dp;
             else if (!c) diasSinConcepto += dp;
-            totalDiasDetalle += dp;
-            totalMontoDetalle += Number(d.Monto || 0);
+            if (c !== 'Devolucion') {
+                totalDiasDetalle += dp;
+                totalMontoDetalle += Number(d.Monto || 0);
+            }
         }
 
         const diasCobrarCalc = Number(licencia.NumDias || 0) - (diasSubsidio + diasDescuento);
@@ -602,7 +604,8 @@ router.get('/licencia/:numero', async (req, res) => {
 // 7. Crear o Modificar Licencia (Frm_IngresoLicencias y Frm_IngresoLicenciasMutual)
 router.post('/licencia', async (req, res) => {
     const pool = req.db;
-    const transaction = new sql.Transaction(pool);
+    const rawPool = pool.mssqlPool || pool;
+    const transaction = new sql.Transaction(rawPool);
     try {
         const b = req.body;
         const numeroLicencia = String(b.numeroLicencia || '').trim();
@@ -796,7 +799,8 @@ router.post('/licencia', async (req, res) => {
 // 8. Eliminar Licencia (solo si totalpagado == 0, igual que Frm_IngresoLicencias.vb Button7_Click_1)
 router.delete('/licencia/:numero', async (req, res) => {
     const pool = req.db;
-    const transaction = new sql.Transaction(pool);
+    const rawPool = pool.mssqlPool || pool;
+    const transaction = new sql.Transaction(rawPool);
     try {
         const numero = req.params.numero.trim();
         await transaction.begin();
@@ -826,9 +830,15 @@ router.delete('/licencia/:numero', async (req, res) => {
             .query(`DELETE FROM LIC_LICENCIA_ACTUAL WHERE RTRIM(NumeroLicencia) = @Num`);
 
         await transaction.commit();
+
+        if (pool.pgPool) {
+            await pool.pgPool.query(`DELETE FROM lic_pago_actual WHERE RTRIM(numerolicencia) = $1`, [numero]).catch(() => {});
+            await pool.pgPool.query(`DELETE FROM lic_licencia_actual WHERE RTRIM(numerolicencia) = $1`, [numero]).catch(() => {});
+        }
+
         res.json({ status: 'ok', message: 'Licencia eliminada correctamente' });
     } catch (err) {
-        await transaction.rollback();
+        await transaction.rollback().catch(() => {});
         console.error('Error eliminando licencia:', err);
         res.status(500).json({ error: 'Error al eliminar la licencia' });
     }
@@ -1166,6 +1176,44 @@ router.post('/cheque', async (req, res) => {
     }
 });
 
+// 12b. Eliminar Transferencia / Documento (DETALLE_CHEQUES) si no tiene pagos imputados
+router.delete('/cheque', async (req, res) => {
+    try {
+        const pool = req.db;
+        const banco = String(req.query.banco || '').trim();
+        const num = String(req.query.num || '').trim();
+        if (!banco || !num) {
+            return res.status(400).json({ error: 'Banco y N° de Transferencia son requeridos para eliminar' });
+        }
+
+        const movRes = await pool.request()
+            .input('Banco', sql.NVarChar, banco)
+            .input('Num', sql.NVarChar, num)
+            .query(`
+                SELECT COUNT(*) as cnt
+                FROM LIC_DETALLE_PAGO_ACTUAL
+                WHERE RTRIM(Banco) = @Banco AND RTRIM(NumeroDocumento) = @Num
+            `);
+
+        const cnt = Number(movRes.recordset[0]?.cnt || 0);
+        if (cnt > 0) {
+            return res.status(400).json({
+                error: `No se puede eliminar la transferencia #${num} porque tiene ${cnt} pago(s) imputado(s). Elimine primero los pagos asociados.`
+            });
+        }
+
+        await pool.request()
+            .input('Banco', sql.NVarChar, banco)
+            .input('Num', sql.NVarChar, num)
+            .query(`DELETE FROM DETALLE_CHEQUES WHERE RTRIM(banco) = @Banco AND RTRIM(num) = @Num`);
+
+        res.json({ status: 'ok', message: `Transferencia #${num} (${banco}) eliminada correctamente` });
+    } catch (err) {
+        console.error('Error eliminando transferencia:', err);
+        res.status(500).json({ error: 'Error al eliminar la transferencia/documento' });
+    }
+});
+
 // 13. Ingresar Pago de Licencia (Frm_IngresoPago.vb Btn_Grabar_Click + Autorización automática si estaba Rechazada)
 router.post('/pago', async (req, res) => {
     const pool = req.db;
@@ -1250,14 +1298,20 @@ router.post('/pago', async (req, res) => {
                 WHERE RTRIM(NumeroLicencia) = @Num
             `);
 
+        let nuevoDiasPagados = 0;
+        let nuevoDiasCobrar = 0;
+        let nuevoTotalPagado = 0;
+        const numDiasLic = Number(licRes.recordset[0].NumDias || 0);
+        const teniaPagoActual = pagoActualRes.recordset.length > 0;
+
         if (concepto !== 'Devolucion') {
-            if (pagoActualRes.recordset.length > 0) {
+            if (teniaPagoActual) {
                 const pa = pagoActualRes.recordset[0];
-                const nuevoDiasCobrar = concepto !== 'Aporte'
+                nuevoDiasCobrar = concepto !== 'Aporte'
                     ? Number(pa.DiasCobrar || 0) - diasPagados
                     : Number(pa.DiasCobrar || 0);
-                const nuevoDiasPagados = Number(pa.NumDiasPagados || 0) + diasPagados;
-                const nuevoTotalPagado = Number(pa.TotalPagado || 0) + monto;
+                nuevoDiasPagados = Number(pa.NumDiasPagados || 0) + diasPagados;
+                nuevoTotalPagado = Number(pa.TotalPagado || 0) + monto;
 
                 await new sql.Request(transaction)
                     .input('Num', sql.NVarChar, numeroLicencia)
@@ -1270,13 +1324,15 @@ router.post('/pago', async (req, res) => {
                         WHERE RTRIM(NumeroLicencia) = @Num
                     `);
             } else {
-                const numDiasLic = Number(licRes.recordset[0].NumDias || 0);
+                nuevoDiasPagados = diasPagados;
+                nuevoDiasCobrar = concepto !== 'Aporte' ? numDiasLic - diasPagados : numDiasLic;
+                nuevoTotalPagado = monto;
                 await new sql.Request(transaction)
                     .input('Num', sql.NVarChar, numeroLicencia)
                     .input('NumDiasLic', sql.Int, numDiasLic)
-                    .input('DiasPag', sql.Int, diasPagados)
-                    .input('DiasCob', sql.Int, numDiasLic - diasPagados)
-                    .input('TotalPag', sql.Decimal(18, 0), monto)
+                    .input('DiasPag', sql.Int, nuevoDiasPagados)
+                    .input('DiasCob', sql.Int, nuevoDiasCobrar)
+                    .input('TotalPag', sql.Decimal(18, 0), nuevoTotalPagado)
                     .query(`
                         INSERT INTO LIC_PAGO_ACTUAL (NumeroLicencia, NumDiasLicencia, NumDiasPagados, DiasCobrar, TotalPagado, Descuento)
                         VALUES (@Num, @NumDiasLic, @DiasPag, @DiasCob, @TotalPag, 0)
@@ -1284,20 +1340,32 @@ router.post('/pago', async (req, res) => {
             }
         }
 
-        // Insertar en LIC_DETALLE_PAGO_ACTUAL usando secuencia dbo.correlativo
+        // Obtener correlativo de la secuencia dbo.correlativo en SQL Server
+        const corrRes = await new sql.Request(transaction).query(`SELECT NEXT VALUE FOR dbo.correlativo as NextCorr`);
+        const nuevoCorrelativo = Number(corrRes.recordset[0].NextCorr);
+
+        const fechaDepVal = b.fechaDocumento || new Date();
+        const recepcionVal = b.fechaRecepcion || new Date();
+        const desdeVal = b.desde || null;
+        const hastaVal = b.hasta || null;
+        const obsVal = String(b.observacionPago || '');
+        const cencoVal = String(b.cenco || '');
+
+        // Insertar en LIC_DETALLE_PAGO_ACTUAL con el correlativo obtenido
         await new sql.Request(transaction)
             .input('NumeroLicencia', sql.NVarChar, numeroLicencia)
             .input('NumeroDocumento', sql.NVarChar, numeroDocumento)
-            .input('FechaDep', sql.Date, b.fechaDocumento || new Date())
+            .input('FechaDep', sql.Date, fechaDepVal)
             .input('DiasPagados', sql.Int, diasPagados)
-            .input('Desde', sql.Date, b.desde || null)
-            .input('Hasta', sql.Date, b.hasta || null)
+            .input('Desde', sql.Date, desdeVal)
+            .input('Hasta', sql.Date, hastaVal)
             .input('Monto', sql.Decimal(18, 0), monto)
-            .input('Observacion', sql.NVarChar, String(b.observacionPago || ''))
-            .input('Recepcion', sql.Date, b.fechaRecepcion || new Date())
+            .input('Observacion', sql.NVarChar, obsVal)
+            .input('Recepcion', sql.Date, recepcionVal)
             .input('Concepto', sql.NVarChar, concepto)
             .input('Banco', sql.NVarChar, banco)
-            .input('Cenco', sql.NVarChar, String(b.cenco || ''))
+            .input('Cenco', sql.NVarChar, cencoVal)
+            .input('Correlativo', sql.BigInt, nuevoCorrelativo)
             .query(`
                 INSERT INTO LIC_DETALLE_PAGO_ACTUAL (
                     NumeroLicencia, NumeroDocumento, FechaDepCtaCte, DiasPagados,
@@ -1305,7 +1373,7 @@ router.post('/pago', async (req, res) => {
                 ) VALUES (
                     @NumeroLicencia, @NumeroDocumento, @FechaDep, @DiasPagados,
                     @Desde, @Hasta, @Monto, @Observacion, @Recepcion, @Concepto, @Banco, @Cenco,
-                    NEXT VALUE FOR dbo.correlativo
+                    @Correlativo
                 )
             `);
 
@@ -1330,7 +1398,8 @@ router.post('/pago', async (req, res) => {
                 `);
         }
 
-        // Actualizar saldo en DETALLE_CHEQUES si existe el cheque
+        // Actualizar saldo en DETALLE_CHEQUES si existe la transferencia
+        let nuevoSaldoCheque = null;
         if (chRes.recordset.length > 0 && concepto !== 'Devolucion') {
             const sumRes = await new sql.Request(transaction)
                 .input('Banco', sql.NVarChar, banco)
@@ -1339,12 +1408,13 @@ router.post('/pago', async (req, res) => {
                     SELECT ISNULL(SUM(Monto), 0) as Suma
                     FROM LIC_DETALLE_PAGO_ACTUAL
                     WHERE RTRIM(Banco) = @Banco AND RTRIM(NumeroDocumento) = @Num
+                      AND RTRIM(ISNULL(concepto, '')) <> 'Devolucion'
                 `);
-            const nuevoSaldo = Number(sumRes.recordset[0].Suma || 0);
+            nuevoSaldoCheque = Number(sumRes.recordset[0].Suma || 0);
             await new sql.Request(transaction)
                 .input('Banco', sql.NVarChar, banco)
                 .input('Num', sql.NVarChar, numeroDocumento)
-                .input('Saldo', sql.Int, nuevoSaldo)
+                .input('Saldo', sql.Int, nuevoSaldoCheque)
                 .query(`
                     UPDATE DETALLE_CHEQUES
                     SET saldo = @Saldo
@@ -1354,28 +1424,63 @@ router.post('/pago', async (req, res) => {
 
         await transaction.commit();
 
-        if (eraRechazada && esPagoSalud && pool.pgPool) {
-            await pool.request()
-                .input('NumLicPg', sql.NVarChar, numeroLicencia)
-                .query(`
-                    UPDATE LIC_LICENCIA_ACTUAL
-                    SET
-                        Rechazo = 0,
-                        Autorizada = 'True',
-                        Estado = 'AUT_PAGO_SALUD',
-                        Observacion_Compin = CASE
-                            WHEN ISNULL(Observacion_Compin, '') LIKE '%AUTORIZADA POR PAGO INST. SALUD%'
-                                THEN Observacion_Compin
-                            WHEN LTRIM(RTRIM(ISNULL(Observacion_Compin, ''))) = ''
-                                THEN '[AUTORIZADA POR PAGO INST. SALUD]'
-                            ELSE LEFT(RTRIM(Observacion_Compin) + ' | [AUTORIZADA POR PAGO INST. SALUD]', 1000)
-                        END
-                    WHERE RTRIM(NumeroLicencia) = @NumLicPg
-                `).catch(() => {});
+        // Sincronizar con PostgreSQL en Modo Dual
+        if (pool.pgPool) {
+            await pool.pgPool.query(`
+                INSERT INTO lic_detalle_pago_actual (
+                    numerolicencia, numerodocumento, fechadepctacte, diaspagados,
+                    desde, hasta, monto, observacion, recepcion, concepto, banco, cenco, correlativo
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            `, [
+                numeroLicencia, numeroDocumento, fechaDepVal, diasPagados,
+                desdeVal, hastaVal, monto, obsVal, recepcionVal, concepto, banco, cencoVal, nuevoCorrelativo
+            ]).catch(e => console.error('[PG Sync Insert Pago]:', e.message));
+
+            if (concepto !== 'Devolucion') {
+                if (teniaPagoActual) {
+                    await pool.pgPool.query(`
+                        UPDATE lic_pago_actual
+                        SET numdiaspagados = $1, diascobrar = $2, totalpagado = $3
+                        WHERE RTRIM(numerolicencia) = $4
+                    `, [nuevoDiasPagados, nuevoDiasCobrar, nuevoTotalPagado, numeroLicencia]).catch(() => {});
+                } else {
+                    await pool.pgPool.query(`
+                        INSERT INTO lic_pago_actual (numerolicencia, numdiaslicencia, numdiaspagados, diascobrar, totalpagado, descuento)
+                        VALUES ($1, $2, $3, $4, $5, 0)
+                    `, [numeroLicencia, numDiasLic, nuevoDiasPagados, nuevoDiasCobrar, nuevoTotalPagado]).catch(() => {});
+                }
+            }
+
+            if (nuevoSaldoCheque !== null) {
+                await pool.pgPool.query(`
+                    UPDATE detalle_cheques SET saldo = $1 WHERE RTRIM(banco) = $2 AND RTRIM(num) = $3
+                `, [nuevoSaldoCheque, banco, numeroDocumento]).catch(() => {});
+            }
+
+            if (eraRechazada && esPagoSalud) {
+                await pool.request()
+                    .input('NumLicPg', sql.NVarChar, numeroLicencia)
+                    .query(`
+                        UPDATE LIC_LICENCIA_ACTUAL
+                        SET
+                            Rechazo = 0,
+                            Autorizada = 'True',
+                            Estado = 'AUT_PAGO_SALUD',
+                            Observacion_Compin = CASE
+                                WHEN ISNULL(Observacion_Compin, '') LIKE '%AUTORIZADA POR PAGO INST. SALUD%'
+                                    THEN Observacion_Compin
+                                WHEN LTRIM(RTRIM(ISNULL(Observacion_Compin, ''))) = ''
+                                    THEN '[AUTORIZADA POR PAGO INST. SALUD]'
+                                ELSE LEFT(RTRIM(Observacion_Compin) + ' | [AUTORIZADA POR PAGO INST. SALUD]', 1000)
+                            END
+                        WHERE RTRIM(NumeroLicencia) = @NumLicPg
+                    `).catch(() => {});
+            }
         }
 
         res.json({
             status: 'ok',
+            correlativo: nuevoCorrelativo,
             message: eraRechazada && esPagoSalud
                 ? 'Pago ingresado correctamente. La licencia estaba Rechazada y pasó automáticamente a Autorizada por Pago de Inst. de Salud.'
                 : 'Pago ingresado correctamente',
@@ -1446,32 +1551,68 @@ router.put('/pago/concepto', async (req, res) => {
 // 16. Eliminar un movimiento de pago individual (Button10_Click en Frm_IngresoPago.vb)
 router.delete('/pago/:correlativo', async (req, res) => {
     const pool = req.db;
-    const transaction = new sql.Transaction(pool);
+    const rawPool = pool.mssqlPool || pool;
+    const transaction = new sql.Transaction(rawPool);
     try {
-        const correlativo = req.params.correlativo;
+        const correlativoRaw = String(req.params.correlativo || '').trim();
+        const tieneCorrValido = correlativoRaw && correlativoRaw !== '0' && correlativoRaw !== 'null' && correlativoRaw !== 'undefined';
+        const qLic = String(req.query.numeroLicencia || '').trim();
+        const qDoc = String(req.query.numeroDocumento || '').trim();
+        const qMonto = parseInt(req.query.monto || '0', 10);
+        const qDias = parseInt(req.query.diasPagados || '0', 10);
+
         await transaction.begin();
 
-        const detRes = await new sql.Request(transaction)
-            .input('Corr', sql.BigInt, correlativo)
-            .query(`
-                SELECT TOP 1
-                    RTRIM(ISNULL(NumeroLicencia, '')) as NumeroLicencia,
-                    RTRIM(ISNULL(NumeroDocumento, '')) as NumeroDocumento,
-                    RTRIM(ISNULL(Banco, '')) as Banco,
-                    ISNULL(Monto, 0) as Monto,
-                    ISNULL(DiasPagados, 0) as DiasPagados
-                FROM LIC_DETALLE_PAGO_ACTUAL
-                WHERE Correlativo = @Corr
-            `);
-
-        if (detRes.recordset.length === 0) {
+        let detRes;
+        if (tieneCorrValido) {
+            detRes = await new sql.Request(transaction)
+                .input('Corr', sql.BigInt, correlativoRaw)
+                .query(`
+                    SELECT TOP 1
+                        Correlativo,
+                        RTRIM(ISNULL(CAST(NumeroLicencia AS VARCHAR(50)), '')) as NumeroLicencia,
+                        RTRIM(ISNULL(NumeroDocumento, '')) as NumeroDocumento,
+                        RTRIM(ISNULL(Banco, '')) as Banco,
+                        RTRIM(ISNULL(concepto, '')) as Concepto,
+                        ISNULL(Monto, 0) as Monto,
+                        ISNULL(DiasPagados, 0) as DiasPagados
+                    FROM LIC_DETALLE_PAGO_ACTUAL
+                    WHERE Correlativo = @Corr
+                `);
+        } else if (qLic && qDoc) {
+            detRes = await new sql.Request(transaction)
+                .input('NumLic', sql.NVarChar, qLic)
+                .input('NumDoc', sql.NVarChar, qDoc)
+                .input('Monto', sql.Decimal(18, 0), qMonto)
+                .input('Dias', sql.Int, qDias)
+                .query(`
+                    SELECT TOP 1
+                        Correlativo,
+                        RTRIM(ISNULL(CAST(NumeroLicencia AS VARCHAR(50)), '')) as NumeroLicencia,
+                        RTRIM(ISNULL(NumeroDocumento, '')) as NumeroDocumento,
+                        RTRIM(ISNULL(Banco, '')) as Banco,
+                        RTRIM(ISNULL(concepto, '')) as Concepto,
+                        ISNULL(Monto, 0) as Monto,
+                        ISNULL(DiasPagados, 0) as DiasPagados
+                    FROM LIC_DETALLE_PAGO_ACTUAL
+                    WHERE RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) = @NumLic
+                      AND RTRIM(NumeroDocumento) = @NumDoc
+                      AND ISNULL(Monto, 0) = @Monto
+                      AND ISNULL(DiasPagados, 0) = @Dias
+                `);
+        } else {
             await transaction.rollback();
-            return res.status(404).json({ error: 'Movimiento de pago no encontrado' });
+            return res.status(400).json({ error: 'Identificador de pago inválido' });
+        }
+
+        if (!detRes || detRes.recordset.length === 0) {
+            await transaction.rollback();
+            return res.status(404).json({ error: 'Movimiento de pago no encontrado en la base de datos' });
         }
 
         const mov = detRes.recordset[0];
 
-        // Verificar si el cheque está cerrado
+        // Verificar si la transferencia está cerrada
         const chRes = await new sql.Request(transaction)
             .input('Banco', sql.NVarChar, mov.Banco)
             .input('Num', sql.NVarChar, mov.NumeroDocumento)
@@ -1479,28 +1620,69 @@ router.delete('/pago/:correlativo', async (req, res) => {
 
         if (chRes.recordset.length > 0 && chRes.recordset[0].Estado === 'Cerrado') {
             await transaction.rollback();
-            return res.status(400).json({ error: 'El cheque está cerrado, no puede eliminar un pago' });
+            return res.status(400).json({
+                error: `La transferencia #${mov.NumeroDocumento} (${mov.Banco}) está Cerrada. Cambie primero el estado de la transferencia a 'Abierto' en la Sección 1 para poder eliminar este pago.`
+            });
         }
 
-        // Restar de LIC_PAGO_ACTUAL
+        // Eliminar el registro de LIC_DETALLE_PAGO_ACTUAL
+        if (tieneCorrValido) {
+            await new sql.Request(transaction)
+                .input('Corr', sql.BigInt, correlativoRaw)
+                .query(`DELETE FROM LIC_DETALLE_PAGO_ACTUAL WHERE Correlativo = @Corr`);
+        } else {
+            await new sql.Request(transaction)
+                .input('NumLic', sql.NVarChar, mov.NumeroLicencia)
+                .input('NumDoc', sql.NVarChar, mov.NumeroDocumento)
+                .input('Monto', sql.Decimal(18, 0), Number(mov.Monto || 0))
+                .input('Dias', sql.Int, Number(mov.DiasPagados || 0))
+                .query(`
+                    DELETE TOP (1) FROM LIC_DETALLE_PAGO_ACTUAL
+                    WHERE RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) = @NumLic
+                      AND RTRIM(NumeroDocumento) = @NumDoc
+                      AND ISNULL(Monto, 0) = @Monto
+                      AND ISNULL(DiasPagados, 0) = @Dias
+                      AND Correlativo IS NULL
+                `);
+        }
+
+        // Recalcular LIC_PAGO_ACTUAL exactamente a partir de los pagos restantes de la licencia
+        const remPagosRes = await new sql.Request(transaction)
+            .input('Num', sql.NVarChar, mov.NumeroLicencia)
+            .query(`
+                SELECT
+                    ISNULL(SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) <> 'Devolucion' THEN ISNULL(Monto, 0) ELSE 0 END), 0) as TotalMonto,
+                    ISNULL(SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) <> 'Devolucion' THEN ISNULL(DiasPagados, 0) ELSE 0 END), 0) as TotalDias,
+                    ISNULL(SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) NOT IN ('Aporte', 'Devolucion') THEN ISNULL(DiasPagados, 0) ELSE 0 END), 0) as DiasDescontarCobro
+                FROM LIC_DETALLE_PAGO_ACTUAL
+                WHERE RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) = @Num
+            `);
+
+        const licDiasRes = await new sql.Request(transaction)
+            .input('Num', sql.NVarChar, mov.NumeroLicencia)
+            .query(`SELECT TOP 1 ISNULL(NumDias, 0) as NumDias FROM LIC_LICENCIA_ACTUAL WHERE RTRIM(NumeroLicencia) = @Num`);
+
+        const numDiasLic = licDiasRes.recordset.length > 0 ? Number(licDiasRes.recordset[0].NumDias || 0) : 0;
+        const rem = remPagosRes.recordset[0] || { TotalMonto: 0, TotalDias: 0, DiasDescontarCobro: 0 };
+        const nuevoTotalPagado = Number(rem.TotalMonto || 0);
+        const nuevoNumDiasPagados = Number(rem.TotalDias || 0);
+        const nuevoDiasCobrar = Math.max(0, numDiasLic - Number(rem.DiasDescontarCobro || 0));
+
         await new sql.Request(transaction)
             .input('Num', sql.NVarChar, mov.NumeroLicencia)
-            .input('Monto', sql.Decimal(18, 0), Number(mov.Monto || 0))
-            .input('Dias', sql.Int, Number(mov.DiasPagados || 0))
+            .input('TotalPag', sql.Decimal(18, 0), nuevoTotalPagado)
+            .input('DiasPag', sql.Int, nuevoNumDiasPagados)
+            .input('DiasCob', sql.Int, nuevoDiasCobrar)
             .query(`
                 UPDATE LIC_PAGO_ACTUAL
-                SET TotalPagado = CASE WHEN ISNULL(TotalPagado, 0) - @Monto < 0 THEN 0 ELSE ISNULL(TotalPagado, 0) - @Monto END,
-                    NumDiasPagados = CASE WHEN ISNULL(NumDiasPagados, 0) - @Dias < 0 THEN 0 ELSE ISNULL(NumDiasPagados, 0) - @Dias END,
-                    DiasCobrar = ISNULL(DiasCobrar, 0) + @Dias
+                SET TotalPagado = @TotalPag,
+                    NumDiasPagados = @DiasPag,
+                    DiasCobrar = @DiasCob
                 WHERE RTRIM(NumeroLicencia) = @Num
             `);
 
-        // Eliminar el registro de LIC_DETALLE_PAGO_ACTUAL
-        await new sql.Request(transaction)
-            .input('Corr', sql.BigInt, correlativo)
-            .query(`DELETE FROM LIC_DETALLE_PAGO_ACTUAL WHERE Correlativo = @Corr`);
-
         // Recalcular saldo en DETALLE_CHEQUES
+        let nuevoSaldoCheque = null;
         if (chRes.recordset.length > 0) {
             const sumRes = await new sql.Request(transaction)
                 .input('Banco', sql.NVarChar, mov.Banco)
@@ -1509,21 +1691,58 @@ router.delete('/pago/:correlativo', async (req, res) => {
                     SELECT ISNULL(SUM(Monto), 0) as Suma
                     FROM LIC_DETALLE_PAGO_ACTUAL
                     WHERE RTRIM(Banco) = @Banco AND RTRIM(NumeroDocumento) = @Num
+                      AND RTRIM(ISNULL(concepto, '')) <> 'Devolucion'
                 `);
-            const nuevoSaldo = Number(sumRes.recordset[0].Suma || 0);
+            nuevoSaldoCheque = Number(sumRes.recordset[0].Suma || 0);
             await new sql.Request(transaction)
                 .input('Banco', sql.NVarChar, mov.Banco)
                 .input('Num', sql.NVarChar, mov.NumeroDocumento)
-                .input('Saldo', sql.Int, nuevoSaldo)
+                .input('Saldo', sql.Int, nuevoSaldoCheque)
                 .query(`UPDATE DETALLE_CHEQUES SET saldo = @Saldo WHERE RTRIM(banco) = @Banco AND RTRIM(num) = @Num`);
         }
 
         await transaction.commit();
-        res.json({ status: 'ok', message: 'Pago eliminado correctamente' });
+
+        // Sincronizar con PostgreSQL en Modo Dual
+        if (pool.pgPool) {
+            if (tieneCorrValido) {
+                await pool.pgPool.query(`DELETE FROM lic_detalle_pago_actual WHERE correlativo = $1`, [correlativoRaw]).catch(() => {});
+            } else {
+                await pool.pgPool.query(`
+                    DELETE FROM lic_detalle_pago_actual
+                    WHERE ctid IN (
+                        SELECT ctid FROM lic_detalle_pago_actual
+                        WHERE RTRIM(CAST(numerolicencia AS TEXT)) = $1
+                          AND RTRIM(numerodocumento) = $2
+                          AND COALESCE(monto, 0) = $3
+                          AND COALESCE(diaspagados, 0) = $4
+                          AND correlativo IS NULL
+                        LIMIT 1
+                    )
+                `, [mov.NumeroLicencia, mov.NumeroDocumento, Number(mov.Monto || 0), Number(mov.DiasPagados || 0)]).catch(() => {});
+            }
+
+            await pool.pgPool.query(`
+                UPDATE lic_pago_actual
+                SET totalpagado = $1, numdiaspagados = $2, diascobrar = $3
+                WHERE RTRIM(numerolicencia) = $4
+            `, [nuevoTotalPagado, nuevoNumDiasPagados, nuevoDiasCobrar, mov.NumeroLicencia]).catch(() => {});
+
+            if (nuevoSaldoCheque !== null) {
+                await pool.pgPool.query(`
+                    UPDATE detalle_cheques SET saldo = $1 WHERE RTRIM(banco) = $2 AND RTRIM(num) = $3
+                `, [nuevoSaldoCheque, mov.Banco, mov.NumeroDocumento]).catch(() => {});
+            }
+        }
+
+        res.json({
+            status: 'ok',
+            message: `Pago de $${Number(mov.Monto || 0).toLocaleString('es-CL')} (${mov.Concepto || 'Sin concepto'}) eliminado correctamente de la licencia #${mov.NumeroLicencia}`
+        });
     } catch (err) {
-        await transaction.rollback();
+        await transaction.rollback().catch(() => {});
         console.error('Error eliminando pago:', err);
-        res.status(500).json({ error: 'Error al eliminar el pago' });
+        res.status(500).json({ error: 'Error al eliminar el pago en la base de datos' });
     }
 });
 
