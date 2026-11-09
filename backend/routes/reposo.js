@@ -217,9 +217,10 @@ router.post('/preview', upload.fields([{ name: 'fileSiniestros', maxCount: 1 }, 
 });
 
 router.post('/procesar', async (req, res) => {
-    const { nuevos, nuevos_existentes, actualizados, fileName, userName } = req.body;
+    const { nuevos = [], nuevos_existentes = [], actualizados = [], fileName, userName } = req.body;
     const pool = req.db;
-    const transaction = new sql.Transaction(pool);
+    const rawPool = pool.mssqlPool || pool;
+    const transaction = new sql.Transaction(rawPool);
 
     try {
         await transaction.begin();
@@ -469,12 +470,71 @@ router.post('/procesar', async (req, res) => {
         }
 
         await transaction.commit();
+
+        // Sincronizar con PostgreSQL en Modo Dual
+        if (pool.pgPool) {
+            try {
+                await pool.pgPool.query(
+                    `INSERT INTO lic_bitacora_archivos (id, nombrearchivo, totalregistros, registrosnuevos, registrosactualizados, registrosnuevosreposos, usuario, fechaproceso)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+                     ON CONFLICT DO NOTHING`,
+                    [idBitacora, fileName || '', nuevos.length + nuevos_existentes.length + actualizados.length, countNuevos, countActualizados, countNuevosExistentes, finalUserName]
+                ).catch(() => {});
+
+                for (const item of nuevos) {
+                    await pool.pgPool.query(`
+                        INSERT INTO lic_licencia_actual (
+                            numerolicencia, rutfuncionario, desde, hasta, numdias,
+                            recepcion, remision, tipo_enferm, tipo_siniestro, obser_apelacion, altaachs,
+                            diasautorizados, coddiagnostico, detallediagnostico, maternal, rechazo, parcial,
+                            observacion, montonetopromedio, subsidiodiario, pagoestimado, rutmedico, nombremedico,
+                            regularizado, dv, pagodirecto, cod_salud, descuento, montodesc, estado,
+                            apelacion, suseso, compin, autorizada, direccion, telefono, tipolic,
+                            usuario, fechahora, fafiliacion, observ_mutual, retenida, jornadaparcial,
+                            observacion_cajala, pendiente, pagoestimadoold
+                        ) VALUES (
+                            $1, $2, $3, $4, $5,
+                            $6, $6, $7, $8, $9, $10,
+                            NULL, NULL, '', false, false, false,
+                            'ACHS OR', NULL, NULL, NULL, '', '',
+                            false, '', 'ACHS OR', '', false, NULL, '',
+                            'false', 'false', 'false', 'false', '', '', 'Oden Reposo',
+                            $11, TO_CHAR(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'), '', '', false, '',
+                            '', false, NULL
+                        )
+                    `, [
+                        item.NumeroLicencia, item.RutFuncionario || null, item.Desde || null, item.Hasta || null, item.NumDias || 0,
+                        item.Recepcion || null, item.Tipo_enferm || '', item.Tipo_Siniestro || '', item.Obser_apelacion || '', item.altaAchs || 'NI',
+                        finalUserName
+                    ]).catch(() => {});
+
+                    await pool.pgPool.query(`
+                        INSERT INTO lic_pago_actual (numerolicencia, numdiaslicencia, numdiaspagados, diascobrar, totalpagado, descuento)
+                        VALUES ($1, $2, 0, $2, 0, 0)
+                    `, [item.NumeroLicencia, item.NumDias || 0]).catch(() => {});
+                }
+
+                for (const item of actualizados) {
+                    await pool.pgPool.query(`
+                        UPDATE lic_licencia_actual SET hasta = $1, numdias = $2 WHERE numerolicencia = $3
+                    `, [item.Hasta || null, item.NumDias || 0, item.NumeroLicencia]).catch(() => {});
+                    await pool.pgPool.query(`
+                        UPDATE lic_pago_actual
+                        SET numdiaslicencia = $1, diascobrar = $1 - COALESCE(numdiaspagados, 0)
+                        WHERE numerolicencia = $2
+                    `, [item.NumDias || 0, item.NumeroLicencia]).catch(() => {});
+                }
+            } catch (pgErr) {
+                console.error('[PG Sync Reposo Error]:', pgErr.message);
+            }
+        }
+
         res.json({ status: 'ok', message: 'Procesado correctamente', nuevos: countNuevos, nuevos_existentes: countNuevosExistentes, actualizados: countActualizados });
 
     } catch (err) {
-        await transaction.rollback();
+        await transaction.rollback().catch(() => {});
         console.error("Error procesando reposo:", err);
-        res.status(500).json({ error: 'Error guardando en base de datos' });
+        res.status(500).json({ error: err.message || 'Error guardando en base de datos' });
     }
 });
 
@@ -497,7 +557,8 @@ router.get('/auditoria', async (req, res) => {
 router.post('/rollback/:id', async (req, res) => {
     const { id } = req.params;
     const pool = req.db;
-    const transaction = new sql.Transaction(pool);
+    const rawPool = pool.mssqlPool || pool;
+    const transaction = new sql.Transaction(rawPool);
 
     try {
         await transaction.begin();
@@ -572,9 +633,9 @@ router.post('/rollback/:id', async (req, res) => {
         res.json({ status: 'ok', message: `Rollback exitoso. Eliminados: ${deleted}, Revertidos: ${reverted}.` });
 
     } catch (err) {
-        await transaction.rollback();
+        await transaction.rollback().catch(() => {});
         console.error("Error en rollback:", err);
-        res.status(500).json({ error: 'Error al intentar deshacer la carga.' });
+        res.status(500).json({ error: err.message || 'Error al intentar deshacer la carga.' });
     }
 });
 
