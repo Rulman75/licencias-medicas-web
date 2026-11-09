@@ -575,74 +575,142 @@ router.post('/procesar', upload.single('archivo'), async (req, res) => {
                     `);
             }
 
-            // 1. LIC_HISTORICO_PREVISION_ACTUAL
+            // 1. LIC_HISTORICO_PREVISION_ACTUAL (TDS Bulk Insert)
             await new sql.Request(transaction)
                 .input('A', sql.Int, anio)
                 .input('M', sql.Int, mes)
                 .query(`DELETE FROM LIC_HISTORICO_PREVISION_ACTUAL WHERE Anio = @A AND Mes = @M`);
 
-            const BATCH_SIZE = 400;
-            for (let i = 0; i < listaPrevision.length; i += BATCH_SIZE) {
-                const chunk = listaPrevision.slice(i, i + BATCH_SIZE);
-                const valuesSql = chunk.map(r =>
-                    `(${sqlVal(r.Anio)},${sqlVal(r.Mes)},${sqlVal(r.Rut)},${sqlVal(r.PorcPrevision)},${sqlVal(r.PorcAdicional)},${sqlVal(r.PorcFijo)},${sqlVal(r.MontoUF)},${sqlVal(r.MontoPeso)},${sqlVal(r.CodPrevision)},${sqlVal(r.CodSalud)},${sqlVal(r.diasTrab)})`
-                ).join(',');
-                await new sql.Request(transaction).query(`
-                    INSERT INTO LIC_HISTORICO_PREVISION_ACTUAL (
-                        Anio, Mes, Rut, PorcPrevision, PorcAdicional, PorcFijo, MontoUF, MontoPeso, CodPrevision, CodSalud, diasTrab
-                    ) VALUES ${valuesSql}
-                `);
-            }
+            const tblPrev = new sql.Table('LIC_HISTORICO_PREVISION_ACTUAL');
+            tblPrev.create = false;
+            tblPrev.columns.add('Anio', sql.Int, { nullable: false });
+            tblPrev.columns.add('Mes', sql.TinyInt, { nullable: false });
+            tblPrev.columns.add('Rut', sql.NVarChar(10), { nullable: false });
+            tblPrev.columns.add('PorcPrevision', sql.Decimal(7, 3), { nullable: true });
+            tblPrev.columns.add('PorcAdicional', sql.Decimal(7, 3), { nullable: true });
+            tblPrev.columns.add('PorcFijo', sql.Decimal(7, 3), { nullable: true });
+            tblPrev.columns.add('MontoUF', sql.Decimal(15, 3), { nullable: true });
+            tblPrev.columns.add('MontoPeso', sql.Numeric(18, 0), { nullable: true });
+            tblPrev.columns.add('CodPrevision', sql.TinyInt, { nullable: true });
+            tblPrev.columns.add('CodSalud', sql.TinyInt, { nullable: true });
+            tblPrev.columns.add('diasTrab', sql.NChar(10), { nullable: true });
 
-            // 2. LIC_HISTORICO_RENTA_IMPONIBLE_ACTUAL
+            for (const r of listaPrevision) {
+                tblPrev.rows.add(
+                    r.Anio,
+                    r.Mes,
+                    r.Rut,
+                    r.PorcPrevision,
+                    r.PorcAdicional,
+                    r.PorcFijo,
+                    r.MontoUF,
+                    r.MontoPeso,
+                    r.CodPrevision > 0 ? r.CodPrevision : null,
+                    r.CodSalud > 0 ? r.CodSalud : null,
+                    r.diasTrab
+                );
+            }
+            await new sql.Request(transaction).bulk(tblPrev);
+
+            // 2. LIC_HISTORICO_RENTA_IMPONIBLE_ACTUAL (TDS Bulk Insert)
             await new sql.Request(transaction)
                 .input('A', sql.Int, anio)
                 .input('M', sql.Int, mes)
                 .query(`DELETE FROM LIC_HISTORICO_RENTA_IMPONIBLE_ACTUAL WHERE Anio = @A AND Mes = @M`);
 
-            for (let i = 0; i < listaRenta.length; i += BATCH_SIZE) {
-                const chunk = listaRenta.slice(i, i + BATCH_SIZE);
-                const valuesSql = chunk.map(r =>
-                    `(${sqlVal(r.Anio)},${sqlVal(r.Mes)},${sqlVal(r.RutFuncionario)},${sqlVal(r.MontoImponible)},${sqlVal(r.descPrevision)},${sqlVal(r.descSalud)},NULL,${sqlVal(r.montoNeto)})`
-                ).join(',');
-                await new sql.Request(transaction).query(`
-                    INSERT INTO LIC_HISTORICO_RENTA_IMPONIBLE_ACTUAL (
-                        Anio, Mes, RutFuncionario, MontoImponible, descPrevision, descSalud, impuestoUnico, montoNeto
-                    ) VALUES ${valuesSql}
-                `);
-            }
+            const tblRenta = new sql.Table('LIC_HISTORICO_RENTA_IMPONIBLE_ACTUAL');
+            tblRenta.create = false;
+            tblRenta.columns.add('Anio', sql.Int, { nullable: false });
+            tblRenta.columns.add('Mes', sql.TinyInt, { nullable: false });
+            tblRenta.columns.add('RutFuncionario', sql.NVarChar(10), { nullable: false });
+            tblRenta.columns.add('MontoImponible', sql.Numeric(18, 0), { nullable: false });
+            tblRenta.columns.add('descPrevision', sql.Numeric(18, 0), { nullable: false });
+            tblRenta.columns.add('descSalud', sql.Numeric(18, 0), { nullable: false });
+            tblRenta.columns.add('impuestoUnico', sql.Numeric(18, 0), { nullable: true });
+            tblRenta.columns.add('montoNeto', sql.Numeric(18, 0), { nullable: true });
 
-            // 3. LIC_FUNCIONARIO (Elimina e inserta vigentes 'S' + históricos 'N' con fAfiliacion preservada)
+            for (const r of listaRenta) {
+                tblRenta.rows.add(
+                    r.Anio,
+                    r.Mes,
+                    r.RutFuncionario,
+                    r.MontoImponible,
+                    r.descPrevision,
+                    r.descSalud,
+                    null,
+                    r.montoNeto
+                );
+            }
+            await new sql.Request(transaction).bulk(tblRenta);
+
+            // 3. LIC_FUNCIONARIO (Elimina e inserta vigentes 'S' + históricos 'N' con fAfiliacion preservada vía TDS Bulk)
             await new sql.Request(transaction).query(`DELETE FROM LIC_FUNCIONARIO`);
 
-            for (let i = 0; i < listaFuncionario.length; i += BATCH_SIZE) {
-                const chunk = listaFuncionario.slice(i, i + BATCH_SIZE);
-                const valuesSql = chunk.map(f =>
-                    `(${sqlVal(f.Rut)},${sqlVal(f.DV)},${sqlVal(f.Nombre)},${sqlVal(f.Paterno)},${sqlVal(f.Materno)},${sqlVal(f.Jornada)},${sqlVal(f.FechaInicio)},${sqlVal(f.FechaTermino)},${sqlVal(f.CodUnidad)},${sqlVal(f.CodContrato)},${sqlVal(f.CodPlanta)},${sqlVal(f.Categoria)},${sqlVal(f.descripcionPlanta)},${sqlVal(f.UltimaPrev)},${sqlVal(f.vigencia)},${sqlVal(f.fAfiliacion)},NULL)`
-                ).join(',');
-                await new sql.Request(transaction).query(`
-                    INSERT INTO LIC_FUNCIONARIO (
-                        Rut, DV, Nombre, Paterno, Materno, Jornada, FechaInicio, FechaTermino,
-                        CodUnidad, CodContrato, CodPlanta, Categoria, descripcionPlanta,
-                        UltimaPrev, vigencia, fAfiliacion, DESCRIPCION
-                    ) VALUES ${valuesSql}
-                `);
-            }
+            const isoToSqlDate = (isoStr) => {
+                if (!isoStr) return null;
+                const d = new Date(`${isoStr}T00:00:00.000Z`);
+                if (isNaN(d.getTime())) return null;
+                const yr = d.getUTCFullYear();
+                if (yr < 1753 || yr > 9999) return null;
+                return d;
+            };
 
-            // 4. Tabla Personal (Elimina e inserta las 68 columnas de Original con DETALLE=1/2/3 y fechas DD-MM-YYYY)
+            const tblFunc = new sql.Table('LIC_FUNCIONARIO');
+            tblFunc.create = false;
+            tblFunc.columns.add('Rut', sql.NVarChar(10), { nullable: false });
+            tblFunc.columns.add('DV', sql.NVarChar(1), { nullable: true });
+            tblFunc.columns.add('Nombre', sql.NVarChar(50), { nullable: true });
+            tblFunc.columns.add('Paterno', sql.NVarChar(30), { nullable: true });
+            tblFunc.columns.add('Materno', sql.NVarChar(30), { nullable: true });
+            tblFunc.columns.add('Jornada', sql.NVarChar(50), { nullable: true });
+            tblFunc.columns.add('FechaInicio', sql.DateTime, { nullable: true });
+            tblFunc.columns.add('FechaTermino', sql.DateTime, { nullable: true });
+            tblFunc.columns.add('CodUnidad', sql.NVarChar(50), { nullable: true });
+            tblFunc.columns.add('CodContrato', sql.NVarChar(50), { nullable: true });
+            tblFunc.columns.add('CodPlanta', sql.NVarChar(50), { nullable: true });
+            tblFunc.columns.add('Categoria', sql.NVarChar(1), { nullable: true });
+            tblFunc.columns.add('descripcionPlanta', sql.NVarChar(150), { nullable: true });
+            tblFunc.columns.add('UltimaPrev', sql.NVarChar(50), { nullable: true });
+            tblFunc.columns.add('vigencia', sql.NVarChar(50), { nullable: true });
+            tblFunc.columns.add('fAfiliacion', sql.NVarChar(50), { nullable: true });
+            tblFunc.columns.add('DESCRIPCION', sql.NVarChar(255), { nullable: true });
+
+            for (const f of listaFuncionario) {
+                tblFunc.rows.add(
+                    f.Rut,
+                    f.DV,
+                    f.Nombre,
+                    f.Paterno,
+                    f.Materno,
+                    f.Jornada,
+                    isoToSqlDate(f.FechaInicio),
+                    isoToSqlDate(f.FechaTermino),
+                    f.CodUnidad,
+                    f.CodContrato,
+                    f.CodPlanta,
+                    f.Categoria,
+                    f.descripcionPlanta,
+                    f.UltimaPrev,
+                    f.vigencia,
+                    f.fAfiliacion,
+                    null
+                );
+            }
+            await new sql.Request(transaction).bulk(tblFunc);
+
+            // 4. Tabla Personal (Elimina e inserta las 68 columnas vía TDS Bulk)
             await new sql.Request(transaction).query(`DELETE FROM Personal`);
 
-            const mssqlPersonalCols = PERSONAL_DB_COLS.map(c => `[${c}]`).join(',');
-            const PERS_BATCH = 150;
-            for (let i = 0; i < listaPersonal.length; i += PERS_BATCH) {
-                const chunk = listaPersonal.slice(i, i + PERS_BATCH);
-                const valuesSql = chunk.map(rowVals =>
-                    `(${rowVals.map(v => sqlVal(v)).join(',')})`
-                ).join(',');
-                await new sql.Request(transaction).query(`
-                    INSERT INTO Personal (${mssqlPersonalCols}) VALUES ${valuesSql}
-                `);
+            const tblPers = new sql.Table('Personal');
+            tblPers.create = false;
+            PERSONAL_DB_COLS.forEach((colName, idx) => {
+                tblPers.columns.add(colName, sql.NVarChar(idx === 4 ? 10 : 255), { nullable: true });
+            });
+
+            for (const rowVals of listaPersonal) {
+                tblPers.rows.add(...rowVals);
             }
+            await new sql.Request(transaction).bulk(tblPers);
 
             await transaction.commit();
         } catch (txErr) {

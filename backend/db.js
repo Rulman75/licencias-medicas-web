@@ -343,12 +343,13 @@ function createMssqlConfig() {
             server: process.env.DB_PORT ? serverHost : rawServer,
             ...(process.env.DB_PORT ? { port: Number(process.env.DB_PORT) } : {}),
             database: process.env.DB_NAME || process.env.DB_DATABASE || 'BDLicencias',
-            requestTimeout: 90000,
+            requestTimeout: 180000,
             connectionTimeout: 30000,
             options: {
                 encrypt: false,
                 trustServerCertificate: true,
                 enableArithAbort: true,
+                cancelTimeout: 30000,
                 ...(!process.env.DB_PORT && instanceName ? { instanceName } : {})
             },
             pool: {
