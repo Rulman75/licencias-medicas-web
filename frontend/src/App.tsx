@@ -14,6 +14,7 @@ import InfoGestionFuncionarios from './pages/InfoGestionFuncionarios';
 import InfoGestionPagoLicencias from './pages/InfoGestionPagoLicencias';
 import MantencionLicencias from './pages/MantencionLicencias';
 import MantencionPagos from './pages/MantencionPagos';
+import CargaRemuneraciones from './pages/CargaRemuneraciones';
 import PagosMasivos from './pages/PagosMasivos';
 import CertificadosNominas from './pages/CertificadosNominas';
 import InformesLegacy from './pages/InformesLegacy';
@@ -32,6 +33,7 @@ function App() {
           {/* Fase 1: Mantención Operativa y Dep. Prevención */}
           <Route path="mantencion/licencias" element={<MantencionLicencias modo="normal" />} />
           <Route path="mantencion/pagos" element={<MantencionPagos />} />
+          <Route path="mantencion/remuneraciones" element={<CargaRemuneraciones />} />
           <Route path="prevencion/licencias-mutual" element={<MantencionLicencias modo="mutual" />} />
 
           {/* Fase 2: Pagos Masivos */}

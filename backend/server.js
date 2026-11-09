@@ -83,6 +83,16 @@ app.use('/api/informes', async (req, res, next) => {
     }
 }, require('./routes/informes'));
 
+// Inject pool for remuneraciones routes (Carga Mensual de Personal, Renta Imponible y Previsión)
+app.use('/api/remuneraciones', async (req, res, next) => {
+    try {
+        req.db = await getConnection();
+        next();
+    } catch (e) {
+        res.status(500).json({ error: 'DB connection error' });
+    }
+}, require('./routes/remuneraciones'));
+
 const jwt = require('jsonwebtoken');
 
 // Login endpoint

@@ -171,6 +171,16 @@ export default function Layout() {
                     >
                       Ingreso Pagos y Transferencias
                     </Link>
+                    <Link
+                      to="/mantencion/remuneraciones"
+                      className={`block py-2 px-3 rounded-md transition-colors ${
+                        isActive('/mantencion/remuneraciones')
+                          ? 'bg-[#39BABD] text-white font-bold'
+                          : 'text-blue-100 hover:bg-white/10'
+                      }`}
+                    >
+                      Carga Mensual Remuneraciones
+                    </Link>
                   </div>
                 )}
               </div>
