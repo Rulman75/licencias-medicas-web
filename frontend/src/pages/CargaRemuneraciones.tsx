@@ -339,7 +339,7 @@ export default function CargaRemuneraciones() {
       <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-[#016098]">
-            Mantención Operativa — Carga Mensual de Remuneraciones y Personal
+            Mantenedor — Carga Mensual de Remuneraciones y Personal
           </h1>
           <p className="text-xs text-[#64748b] mt-1">
             Proceso automatizado que reemplaza la macro `Formato Licencias_.xlsm` e impacta `LIC_HISTORICO_PREVISION_ACTUAL`, `LIC_HISTORICO_RENTA_IMPONIBLE_ACTUAL`, `LIC_FUNCIONARIO` y `Personal`.
