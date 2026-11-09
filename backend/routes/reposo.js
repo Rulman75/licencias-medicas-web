@@ -288,8 +288,8 @@ router.post('/procesar', async (req, res) => {
                 reqPago.input('NumeroLicencia', sql.NVarChar, item.NumeroLicencia);
                 reqPago.input('NumDiasLicencia', sql.Int, item.NumDias || 0);
                 await reqPago.query(`
-                    INSERT INTO LIC_PAGO_ACTUAL (NumeroLicencia, NumDiasLicencia)
-                    VALUES (@NumeroLicencia, @NumDiasLicencia)
+                    INSERT INTO LIC_PAGO_ACTUAL (NumeroLicencia, NumDiasLicencia, NumDiasPagados, DiasCobrar, TotalPagado, Descuento)
+                    VALUES (@NumeroLicencia, @NumDiasLicencia, 0, @NumDiasLicencia, 0, 0)
                 `);
 
                 // Insert into Rollback Log
@@ -401,8 +401,8 @@ router.post('/procesar', async (req, res) => {
                 reqPago.input('NumeroLicencia', sql.NVarChar, newNumero);
                 reqPago.input('NumDiasLicencia', sql.Int, finalNumDias);
                 await reqPago.query(`
-                    INSERT INTO LIC_PAGO_ACTUAL (NumeroLicencia, NumDiasLicencia)
-                    VALUES (@NumeroLicencia, @NumDiasLicencia)
+                    INSERT INTO LIC_PAGO_ACTUAL (NumeroLicencia, NumDiasLicencia, NumDiasPagados, DiasCobrar, TotalPagado, Descuento)
+                    VALUES (@NumeroLicencia, @NumDiasLicencia, 0, @NumDiasLicencia, 0, 0)
                 `);
 
                 // Insert into Rollback Log
@@ -447,7 +447,8 @@ router.post('/procesar', async (req, res) => {
                 reqPago.input('NumeroLicencia', sql.NVarChar, item.NumeroLicencia);
                 await reqPago.query(`
                     UPDATE LIC_PAGO_ACTUAL 
-                    SET NumDiasLicencia = @NumDiasLicencia 
+                    SET NumDiasLicencia = @NumDiasLicencia,
+                        DiasCobrar = @NumDiasLicencia - ISNULL(NumDiasPagados, 0)
                     WHERE NumeroLicencia = @NumeroLicencia
                 `);
 

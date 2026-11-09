@@ -199,23 +199,35 @@ router.get('/funcionario/:rut', async (req, res) => {
                     CASE WHEN ISNULL(DP.CantPagos, 0) > 0 THEN ISNULL(DP.SumaDias, 0) ELSE ISNULL(P.NumDiasPagados, 0) END as NumDiasPagados,
                     CASE WHEN ISNULL(DP.CantPagos, 0) > 0 THEN ISNULL(DP.DiasSubsidio, 0) ELSE ISNULL(P.NumDiasPagados, 0) END as DiasPagadosSubsidio,
                     ISNULL(DP.DiasAporte, 0) as DiasPagadosAporte,
-                    ISNULL(P.DiasCobrar, 0) as DiasCobrar,
+                    CASE
+                        WHEN ISNULL(DP.CantPagos, 0) > 0 THEN ISNULL(L.NumDias, 0) - ISNULL(DP.DiasSubsidio, 0)
+                        ELSE ISNULL(P.DiasCobrar, ISNULL(L.NumDias, 0) - ISNULL(P.NumDiasPagados, 0))
+                    END as DiasCobrar,
                     CASE WHEN ISNULL(DP.CantPagos, 0) > 0 THEN ISNULL(DP.SumaMonto, 0) ELSE ISNULL(P.TotalPagado, 0) END as TotalPagado,
                     ISNULL(DP.SumaMonto, 0) as TotalDetallePagado,
                     ISNULL(DP.CantPagos, 0) as CantidadPagos
                 FROM LIC_LICENCIA_ACTUAL L
-                LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
+                LEFT JOIN (
+                    SELECT
+                        RTRIM(NumeroLicencia) as NumeroLicencia,
+                        MAX(ISNULL(NumDiasLicencia, 0)) as NumDiasLicencia,
+                        MAX(ISNULL(NumDiasPagados, 0)) as NumDiasPagados,
+                        MAX(DiasCobrar) as DiasCobrar,
+                        MAX(ISNULL(TotalPagado, 0)) as TotalPagado
+                    FROM LIC_PAGO_ACTUAL
+                    GROUP BY RTRIM(NumeroLicencia)
+                ) P ON RTRIM(L.NumeroLicencia) = P.NumeroLicencia
                 LEFT JOIN (
                     SELECT 
-                        NumeroLicencia,
-                        SUM(ISNULL(Monto, 0)) as SumaMonto,
-                        SUM(ISNULL(DiasPagados, 0)) as SumaDias,
+                        RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) as NumeroLicencia,
+                        SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) <> 'Devolucion' THEN ISNULL(Monto, 0) ELSE 0 END) as SumaMonto,
+                        SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) <> 'Devolucion' THEN ISNULL(DiasPagados, 0) ELSE 0 END) as SumaDias,
                         SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) = 'Aporte' THEN ISNULL(DiasPagados, 0) ELSE 0 END) as DiasAporte,
-                        SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) <> 'Aporte' THEN ISNULL(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
+                        SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) NOT IN ('Aporte', 'Devolucion') THEN ISNULL(DiasPagados, 0) ELSE 0 END) as DiasSubsidio,
                         COUNT(*) as CantPagos
                     FROM LIC_DETALLE_PAGO_ACTUAL
-                    GROUP BY NumeroLicencia
-                ) DP ON L.NumeroLicencia = DP.NumeroLicencia
+                    GROUP BY RTRIM(CAST(NumeroLicencia AS VARCHAR(50)))
+                ) DP ON RTRIM(L.NumeroLicencia) = DP.NumeroLicencia
                 WHERE L.RutFuncionario = @Rut
                 ORDER BY L.Desde DESC
             `);
@@ -1298,47 +1310,8 @@ router.post('/pago', async (req, res) => {
                 WHERE RTRIM(NumeroLicencia) = @Num
             `);
 
-        let nuevoDiasPagados = 0;
-        let nuevoDiasCobrar = 0;
-        let nuevoTotalPagado = 0;
         const numDiasLic = Number(licRes.recordset[0].NumDias || 0);
         const teniaPagoActual = pagoActualRes.recordset.length > 0;
-
-        if (concepto !== 'Devolucion') {
-            if (teniaPagoActual) {
-                const pa = pagoActualRes.recordset[0];
-                nuevoDiasCobrar = concepto !== 'Aporte'
-                    ? Number(pa.DiasCobrar || 0) - diasPagados
-                    : Number(pa.DiasCobrar || 0);
-                nuevoDiasPagados = Number(pa.NumDiasPagados || 0) + diasPagados;
-                nuevoTotalPagado = Number(pa.TotalPagado || 0) + monto;
-
-                await new sql.Request(transaction)
-                    .input('Num', sql.NVarChar, numeroLicencia)
-                    .input('DiasPag', sql.Int, nuevoDiasPagados)
-                    .input('DiasCob', sql.Int, nuevoDiasCobrar)
-                    .input('TotalPag', sql.Decimal(18, 0), nuevoTotalPagado)
-                    .query(`
-                        UPDATE LIC_PAGO_ACTUAL
-                        SET NumDiasPagados = @DiasPag, DiasCobrar = @DiasCob, TotalPagado = @TotalPag
-                        WHERE RTRIM(NumeroLicencia) = @Num
-                    `);
-            } else {
-                nuevoDiasPagados = diasPagados;
-                nuevoDiasCobrar = concepto !== 'Aporte' ? numDiasLic - diasPagados : numDiasLic;
-                nuevoTotalPagado = monto;
-                await new sql.Request(transaction)
-                    .input('Num', sql.NVarChar, numeroLicencia)
-                    .input('NumDiasLic', sql.Int, numDiasLic)
-                    .input('DiasPag', sql.Int, nuevoDiasPagados)
-                    .input('DiasCob', sql.Int, nuevoDiasCobrar)
-                    .input('TotalPag', sql.Decimal(18, 0), nuevoTotalPagado)
-                    .query(`
-                        INSERT INTO LIC_PAGO_ACTUAL (NumeroLicencia, NumDiasLicencia, NumDiasPagados, DiasCobrar, TotalPagado, Descuento)
-                        VALUES (@Num, @NumDiasLic, @DiasPag, @DiasCob, @TotalPag, 0)
-                    `);
-            }
-        }
 
         // Obtener correlativo de la secuencia dbo.correlativo en SQL Server
         const corrRes = await new sql.Request(transaction).query(`SELECT NEXT VALUE FOR dbo.correlativo as NextCorr`);
@@ -1376,6 +1349,48 @@ router.post('/pago', async (req, res) => {
                     @Correlativo
                 )
             `);
+
+        // Recalcular LIC_PAGO_ACTUAL exactamente a partir de los pagos reales de la licencia y NumDias de LIC_LICENCIA_ACTUAL
+        const sumPagosLicRes = await new sql.Request(transaction)
+            .input('Num', sql.NVarChar, numeroLicencia)
+            .query(`
+                SELECT
+                    ISNULL(SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) <> 'Devolucion' THEN ISNULL(Monto, 0) ELSE 0 END), 0) as TotalMonto,
+                    ISNULL(SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) <> 'Devolucion' THEN ISNULL(DiasPagados, 0) ELSE 0 END), 0) as TotalDias,
+                    ISNULL(SUM(CASE WHEN RTRIM(ISNULL(concepto, '')) NOT IN ('Aporte', 'Devolucion') THEN ISNULL(DiasPagados, 0) ELSE 0 END), 0) as DiasDescontarCobro
+                FROM LIC_DETALLE_PAGO_ACTUAL
+                WHERE RTRIM(CAST(NumeroLicencia AS VARCHAR(50))) = @Num
+            `);
+
+        const sp = sumPagosLicRes.recordset[0] || { TotalMonto: 0, TotalDias: 0, DiasDescontarCobro: 0 };
+        const nuevoTotalPagado = Number(sp.TotalMonto || 0);
+        const nuevoDiasPagados = Number(sp.TotalDias || 0);
+        const nuevoDiasCobrar = numDiasLic - Number(sp.DiasDescontarCobro || 0);
+
+        if (teniaPagoActual) {
+            await new sql.Request(transaction)
+                .input('Num', sql.NVarChar, numeroLicencia)
+                .input('NumDiasLic', sql.Int, numDiasLic)
+                .input('DiasPag', sql.Int, nuevoDiasPagados)
+                .input('DiasCob', sql.Int, nuevoDiasCobrar)
+                .input('TotalPag', sql.Decimal(18, 0), nuevoTotalPagado)
+                .query(`
+                    UPDATE LIC_PAGO_ACTUAL
+                    SET NumDiasLicencia = @NumDiasLic, NumDiasPagados = @DiasPag, DiasCobrar = @DiasCob, TotalPagado = @TotalPag
+                    WHERE RTRIM(NumeroLicencia) = @Num
+                `);
+        } else {
+            await new sql.Request(transaction)
+                .input('Num', sql.NVarChar, numeroLicencia)
+                .input('NumDiasLic', sql.Int, numDiasLic)
+                .input('DiasPag', sql.Int, nuevoDiasPagados)
+                .input('DiasCob', sql.Int, nuevoDiasCobrar)
+                .input('TotalPag', sql.Decimal(18, 0), nuevoTotalPagado)
+                .query(`
+                    INSERT INTO LIC_PAGO_ACTUAL (NumeroLicencia, NumDiasLicencia, NumDiasPagados, DiasCobrar, TotalPagado, Descuento)
+                    VALUES (@Num, @NumDiasLic, @DiasPag, @DiasCob, @TotalPag, 0)
+                `);
+        }
 
         // Si la licencia estaba Rechazada y recibe un pago por Subsidio o Aporte, pasa a Autorizada
         if (eraRechazada && esPagoSalud) {
