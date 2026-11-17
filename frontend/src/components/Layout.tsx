@@ -497,6 +497,16 @@ export default function Layout() {
               {menuLicenciasOpen && (
                 <div className="ml-4 pl-3 border-l border-white/20 space-y-1 mt-1 text-xs">
                   <Link
+                    to="/licencias/auditoria-cuadratura"
+                    className={`block py-2 px-3 rounded-md transition-colors ${
+                      isActive('/licencias/auditoria-cuadratura')
+                        ? 'bg-[#39BABD] text-white font-bold'
+                        : 'text-blue-100 hover:bg-white/10'
+                    }`}
+                  >
+                    Auditoría Cuadratura Real
+                  </Link>
+                  <Link
                     to="/licencias/estadisticas"
                     className={`block py-2 px-3 rounded-md transition-colors ${
                       isActive('/licencias/estadisticas')

@@ -200,7 +200,6 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
             FROM LIC_LICENCIA_ACTUAL L
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             LEFT JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
-            LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
             ${dpJoin}
             WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' ${yearFilter}
         `);
@@ -227,7 +226,6 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                     SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN (${montoBaseExpr}) ELSE 0 END AS BIGINT)) as Estimado,
                     SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, 0) ELSE 0 END AS BIGINT)) as Pagado
                 FROM LIC_LICENCIA_ACTUAL L
-                LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 ${dpJoin}
                 WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' AND YEAR(L.Desde) = @Year
                 GROUP BY MONTH(L.Desde)
@@ -243,7 +241,6 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
                     SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN (${montoBaseExpr}) ELSE 0 END AS BIGINT)) as Estimado,
                     SUM(CAST(CASE WHEN RTRIM(ISNULL(L.PagoDirecto, '')) NOT IN ('Nula', 'Pago Directo', 'PPP') THEN COALESCE(DP.SumaMonto, 0) ELSE 0 END AS BIGINT)) as Pagado
                 FROM LIC_LICENCIA_ACTUAL L
-                LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 ${dpJoin}
                 WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula'
                   AND YEAR(L.Desde) >= 2020 AND YEAR(L.Desde) <= YEAR(GETDATE())
@@ -262,7 +259,6 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
             FROM LIC_LICENCIA_ACTUAL L
             INNER JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             INNER JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
-            LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
             ${dpJoin}
             WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' ${yearFilter}
             GROUP BY RTRIM(ISNULL(S.Descripcion, 'SIN INFORMACIÓN'))
@@ -310,7 +306,6 @@ app.get('/api/dashboard/inicio-stats', async (req, res) => {
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
             LEFT JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
-            LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
             ${dpJoin}
             WHERE RTRIM(ISNULL(L.PagoDirecto, '')) <> 'Nula' ${yearFilter}
             ORDER BY L.Recepcion DESC, L.Desde DESC
@@ -514,11 +509,44 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                             ELSE 0
                         END AS BIGINT
                     )) as MontoFalsoRechazoSalud,
-                    SUM(CAST(${montoDescEfectivo} AS BIGINT)) as MontoRechazadoDescuentoFunc
+                    SUM(CAST(${montoDescEfectivo} AS BIGINT)) as MontoRechazadoDescuentoFunc,
+                    -- Métricas de Auditoría y Cuadratura Matemática Exacta (No Rechazadas)
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 THEN 1 ELSE 0 END) as LicenciasNoRechazadasCant,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) > (${montoBase}) THEN 1 ELSE 0 END) as MayorCant,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) > (${montoBase}) THEN (${montoBase}) ELSE 0 END AS BIGINT)) as MayorEstimado,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) > (${montoBase}) THEN COALESCE(DP.MontoSalud, 0) ELSE 0 END AS BIGINT)) as MayorRecibido,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) > (${montoBase}) THEN COALESCE(DP.MontoSalud, 0) - (${montoBase}) ELSE 0 END AS BIGINT)) as MayorDeltaMas,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) = (${montoBase}) THEN 1 ELSE 0 END) as ExactaCant,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) = (${montoBase}) THEN (${montoBase}) ELSE 0 END AS BIGINT)) as ExactaEstimado,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) = (${montoBase}) THEN COALESCE(DP.MontoSalud, 0) ELSE 0 END AS BIGINT)) as ExactaRecibido,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) THEN 1 ELSE 0 END) as MenorTotalCant,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) THEN (${montoBase}) ELSE 0 END AS BIGINT)) as MenorTotalEstimado,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) THEN COALESCE(DP.MontoSalud, 0) ELSE 0 END AS BIGINT)) as MenorTotalRecibido,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) THEN (${montoBase}) - COALESCE(DP.MontoSalud, 0) ELSE 0 END AS BIGINT)) as MenorTotalDeltaMenos,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) AND (${esSaldadaSalud}) = 1 THEN 1 ELSE 0 END) as MenorSaldadaCant,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) AND (${esSaldadaSalud}) = 1 THEN (${montoBase}) ELSE 0 END AS BIGINT)) as MenorSaldadaEstimado,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) AND (${esSaldadaSalud}) = 1 THEN COALESCE(DP.MontoSalud, 0) ELSE 0 END AS BIGINT)) as MenorSaldadaRecibido,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) AND (${esSaldadaSalud}) = 1 THEN (${montoBase}) - COALESCE(DP.MontoSalud, 0) ELSE 0 END AS BIGINT)) as MenorSaldadaDeltaDefinitivo,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) AND COALESCE(DP.MontoSalud, 0) > 0 AND (${esSaldadaSalud}) = 0 THEN 1 ELSE 0 END) as MenorParcialCant,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) AND COALESCE(DP.MontoSalud, 0) > 0 AND (${esSaldadaSalud}) = 0 THEN (${montoBase}) ELSE 0 END AS BIGINT)) as MenorParcialEstimado,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) AND COALESCE(DP.MontoSalud, 0) > 0 AND (${esSaldadaSalud}) = 0 THEN COALESCE(DP.MontoSalud, 0) ELSE 0 END AS BIGINT)) as MenorParcialRecibido,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) AND COALESCE(DP.MontoSalud, 0) > 0 AND (${esSaldadaSalud}) = 0 THEN (${montoBase}) - COALESCE(DP.MontoSalud, 0) ELSE 0 END AS BIGINT)) as MenorParcialFalta,
+                    SUM(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) AND COALESCE(DP.MontoSalud, 0) = 0 AND (${esSaldadaSalud}) = 0 THEN 1 ELSE 0 END) as MenorSinPagoCant,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) AND COALESCE(DP.MontoSalud, 0) = 0 AND (${esSaldadaSalud}) = 0 THEN (${montoBase}) ELSE 0 END AS BIGINT)) as MenorSinPagoEstimado,
+                    SUM(CAST(CASE WHEN ISNULL(L.Rechazo, 0) = 0 AND COALESCE(DP.MontoSalud, 0) < (${montoBase}) AND COALESCE(DP.MontoSalud, 0) = 0 AND (${esSaldadaSalud}) = 0 THEN (${montoBase}) ELSE 0 END AS BIGINT)) as MenorSinPagoFalta,
+                    SUM(CAST(
+                        CASE
+                            WHEN ISNULL(L.Rechazo, 0) = 0 THEN
+                                CASE
+                                    WHEN COALESCE(DP.MontoSalud, 0) > (${montoBase}) THEN (${montoBase})
+                                    ELSE COALESCE(DP.MontoSalud, 0)
+                                END
+                            ELSE 0
+                        END AS BIGINT
+                    )) as EstimadoCubiertoReal
                 FROM LIC_LICENCIA_ACTUAL L
                 LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
                 LEFT JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
-                LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
                 LEFT JOIN (
                     SELECT
                         NumeroLicencia,
@@ -597,7 +625,31 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
             MontoAutorizadasPorPagoSalud: 0,
             MontoFalsoRechazoSalud: 0,
             MontoRechazadoDescuentoFunc: 0,
-            FaltaPorCobrarTotal: 0
+            FaltaPorCobrarTotal: 0,
+            LicenciasNoRechazadasCant: 0,
+            MayorCant: 0,
+            MayorEstimado: 0,
+            MayorRecibido: 0,
+            MayorDeltaMas: 0,
+            ExactaCant: 0,
+            ExactaEstimado: 0,
+            ExactaRecibido: 0,
+            MenorTotalCant: 0,
+            MenorTotalEstimado: 0,
+            MenorTotalRecibido: 0,
+            MenorTotalDeltaMenos: 0,
+            MenorSaldadaCant: 0,
+            MenorSaldadaEstimado: 0,
+            MenorSaldadaRecibido: 0,
+            MenorSaldadaDeltaDefinitivo: 0,
+            MenorParcialCant: 0,
+            MenorParcialEstimado: 0,
+            MenorParcialRecibido: 0,
+            MenorParcialFalta: 0,
+            MenorSinPagoCant: 0,
+            MenorSinPagoEstimado: 0,
+            MenorSinPagoFalta: 0,
+            EstimadoCubiertoReal: 0
         };
 
         for (let m = 1; m <= 12; m++) {
@@ -655,6 +707,30 @@ app.get('/api/dashboard/convenio-mensual', async (req, res) => {
                 MontoFalsoRechazoSalud: Number(r.MontoFalsoRechazoSalud || 0),
                 MontoRechazadoDescuentoFunc: Number(r.MontoRechazadoDescuentoFunc || 0),
                 FaltaPorCobrarTotal: falta + mRecup + mIncob,
+                LicenciasNoRechazadasCant: Number(r.LicenciasNoRechazadasCant || 0),
+                MayorCant: Number(r.MayorCant || 0),
+                MayorEstimado: Number(r.MayorEstimado || 0),
+                MayorRecibido: Number(r.MayorRecibido || 0),
+                MayorDeltaMas: Number(r.MayorDeltaMas || 0),
+                ExactaCant: Number(r.ExactaCant || 0),
+                ExactaEstimado: Number(r.ExactaEstimado || 0),
+                ExactaRecibido: Number(r.ExactaRecibido || 0),
+                MenorTotalCant: Number(r.MenorTotalCant || 0),
+                MenorTotalEstimado: Number(r.MenorTotalEstimado || 0),
+                MenorTotalRecibido: Number(r.MenorTotalRecibido || 0),
+                MenorTotalDeltaMenos: Number(r.MenorTotalDeltaMenos || 0),
+                MenorSaldadaCant: Number(r.MenorSaldadaCant || 0),
+                MenorSaldadaEstimado: Number(r.MenorSaldadaEstimado || 0),
+                MenorSaldadaRecibido: Number(r.MenorSaldadaRecibido || 0),
+                MenorSaldadaDeltaDefinitivo: Number(r.MenorSaldadaDeltaDefinitivo || 0),
+                MenorParcialCant: Number(r.MenorParcialCant || 0),
+                MenorParcialEstimado: Number(r.MenorParcialEstimado || 0),
+                MenorParcialRecibido: Number(r.MenorParcialRecibido || 0),
+                MenorParcialFalta: Number(r.MenorParcialFalta || 0),
+                MenorSinPagoCant: Number(r.MenorSinPagoCant || 0),
+                MenorSinPagoEstimado: Number(r.MenorSinPagoEstimado || 0),
+                MenorSinPagoFalta: Number(r.MenorSinPagoFalta || 0),
+                EstimadoCubiertoReal: Number(r.EstimadoCubiertoReal || 0),
                 PorcentajePago: est > 0 ? Number(((pag / est) * 100).toFixed(1)) : 0,
                 PorcentajeCobertura: totalLic > 0 ? Number(((licPag / totalLic) * 100).toFixed(1)) : 0
             };
@@ -804,7 +880,6 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
             LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
             LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
             LEFT JOIN LIC_SALUD S ON F.UltimaPrev = S.CodSalud
-            LEFT JOIN LIC_PAGO_ACTUAL P ON L.NumeroLicencia = P.NumeroLicencia
             LEFT JOIN (
                 SELECT
                     NumeroLicencia,
@@ -901,6 +976,35 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                 }
             }
 
+            let grupoCuadratura = 'RECHAZADA';
+            let estimadoCubierto = 0;
+            let deltaFavor = 0;
+            let deltaContraDefinitivo = 0;
+            let faltaPorCobrarReal = 0;
+
+            if (!esRechazada) {
+                if (pagadoSalud > estimado) {
+                    grupoCuadratura = 'MAYOR';
+                    estimadoCubierto = estimado;
+                    deltaFavor = pagadoSalud - estimado;
+                } else if (pagadoSalud === estimado) {
+                    grupoCuadratura = 'EXACTA';
+                    estimadoCubierto = estimado;
+                } else {
+                    estimadoCubierto = pagadoSalud;
+                    if (esSaldada) {
+                        grupoCuadratura = 'MENOR_SALDADA';
+                        deltaContraDefinitivo = estimado - pagadoSalud;
+                    } else if (pagadoSalud > 0) {
+                        grupoCuadratura = 'MENOR_PARCIAL';
+                        faltaPorCobrarReal = estimado - pagadoSalud;
+                    } else {
+                        grupoCuadratura = 'MENOR_SIN_PAGO';
+                        faltaPorCobrarReal = estimado;
+                    }
+                }
+            }
+
             return {
                 ...r,
                 Vigencia: esVigente ? 'S' : 'N',
@@ -912,6 +1016,11 @@ app.get('/api/dashboard/convenio-mensual/detalle', async (req, res) => {
                 EsFalsoRechazoCompin: esFalsoRechazoCompin,
                 EscenarioCobro: escenarioCobro,
                 SituacionCobroLabel: situacionCobroLabel,
+                GrupoCuadratura: grupoCuadratura,
+                EstimadoCubierto: estimadoCubierto,
+                DeltaFavor: deltaFavor,
+                DeltaContraDefinitivo: deltaContraDefinitivo,
+                FaltaPorCobrarReal: faltaPorCobrarReal,
                 FechaPago: fechaPagoStr,
                 DiasDemoraPago: diasDemoraPago
             };

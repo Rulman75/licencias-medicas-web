@@ -57,12 +57,42 @@ interface MesConvenioRow {
   MontoFalsoRechazoSalud: number;
   MontoRechazadoDescuentoFunc: number;
   FaltaPorCobrarTotal: number;
+  LicenciasNoRechazadasCant?: number;
+  MayorCant?: number;
+  MayorEstimado?: number;
+  MayorRecibido?: number;
+  MayorDeltaMas?: number;
+  ExactaCant?: number;
+  ExactaEstimado?: number;
+  ExactaRecibido?: number;
+  MenorTotalCant?: number;
+  MenorTotalEstimado?: number;
+  MenorTotalRecibido?: number;
+  MenorTotalDeltaMenos?: number;
+  MenorSaldadaCant?: number;
+  MenorSaldadaEstimado?: number;
+  MenorSaldadaRecibido?: number;
+  MenorSaldadaDeltaDefinitivo?: number;
+  MenorParcialCant?: number;
+  MenorParcialEstimado?: number;
+  MenorParcialRecibido?: number;
+  MenorParcialFalta?: number;
+  MenorSinPagoCant?: number;
+  MenorSinPagoEstimado?: number;
+  MenorSinPagoFalta?: number;
+  EstimadoCubiertoReal?: number;
   PorcentajePago: number;
   PorcentajeCobertura: number;
 }
 
 type FiltroDetalleTipo =
   | 'todas'
+  | 'no-rechazadas'
+  | 'mayor'
+  | 'exacta'
+  | 'menor-total'
+  | 'menor-saldada'
+  | 'menor-parcial'
   | 'por-cobrar'
   | 'sin-pago'
   | 'pagadas'
@@ -75,9 +105,15 @@ type FiltroDetalleTipo =
   | 'rech-recuperadas';
 
 const ETIQUETAS_FILTRO: Record<FiltroDetalleTipo, string> = {
-  'todas': 'Todas las Licencias del Período',
-  'por-cobrar': 'Pendientes por Cobrar a Instituciones de Salud (Según regla FONASA ≤3d / >3d e ISAPRE)',
-  'sin-pago': 'Licencias No Rechazadas en $0 (Sin Pago de Inst. de Salud aún)',
+  'todas': 'Todas las Licencias del Período (Válidas + Rechazadas)',
+  'no-rechazadas': '100% Universo Pago Estimado Válido (No Rechazadas)',
+  'mayor': '1. Licencias con Pago Mayor al Estimado (Se toma el Estimado para cuadrar; Delta a Favor es informativo)',
+  'exacta': '2. Licencias Neteadas / Cuadradas Exactas (Recibido = Estimado, Delta $0)',
+  'menor-total': '3. Total Licencias con Pago Menor al Estimado (Delta en Contra)',
+  'menor-saldada': '3A. Menor Pago pero Ya Saldadas por Regla (No llegará otro pago -> Queda en $0 por cobrar)',
+  'menor-parcial': '3B. Menor Pago con Pago Parcial Abierto (Sí llegará otro delta -> Va a Falta por Cobrar)',
+  'por-cobrar': 'Falta por Cobrar Real a Instituciones de Salud (Pago Parcial Abierto + Sin Pago en $0)',
+  'sin-pago': '3C. Licencias No Rechazadas en $0 (Sin Pago de Inst. de Salud aún -> Pendiente 100%)',
   'pagadas': 'Licencias Válidas Saldadas por Inst. de Salud (FONASA ≤3d Aporte, >3d Aporte+Subsidio, ISAPRE Pago)',
   'rechazadas': 'Todas las Licencias Marcadas como Rechazadas',
   'falso-rechazo-salud': '⚡ Licencias Autorizadas Automáticamente por Recibo de Pago Inst. Salud (AUT_PAGO_SALUD)',
@@ -225,13 +261,16 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
       'Rech. Incobrables (No Vigentes)': m.RechazadasIncobrablesCant,
       'Rech. Recuperadas por Descuento/Devol.': m.RechazadasRecuperadasDescCant,
       'Pago Estimado Total ($)': m.TotalEstimado,
-      'Pago Estimado No Rechazadas ($)': m.EstimadoNoRechazado,
-      'Pago Estimado Rechazadas ($)': m.MontoRechazado,
-      'Pagado por Inst. de Salud Total (Sub+Apo) ($)': m.PagadoSaludTotal,
+      '1. Pago Estimado No Rechazadas ($)': m.EstimadoNoRechazado,
+      '2. Estimado Cubierto Real (Topeado a Estimado) ($)': m.EstimadoCubiertoReal ?? m.PagadoSaludTotal,
+      '3. Delta en Contra Saldado en $0 (Menor Pago Ya Cerrado) ($)': m.MenorSaldadaDeltaDefinitivo || 0,
+      '4. Falta por Cobrar Real a Inst. de Salud ($)': m.FaltaPorCobrar,
+      'Info: Delta a Favor Recibido de Más (No suma al Estimado) ($)': m.MayorDeltaMas || 0,
+      'Pagado Bruto por Inst. de Salud (Sub+Apo) ($)': m.PagadoSaludTotal,
       'Recibido Subsidio Inst. Salud ($)': m.PagadoSubsidio,
       'Recibido Aporte Inst. Salud ($)': m.PagadoAporte,
+      'Pago Estimado Rechazadas ($)': m.MontoRechazado,
       'Recuperado por Descuento/Devol. Funcionario ($)': m.PagadoDescuentoFunc,
-      'Falta por Cobrar a Inst. de Salud ($)': m.FaltaPorCobrar,
       'Monto Rech. Recuperable Vigentes ($)': m.MontoRechazadoRecuperable,
       'Monto Rech. Incobrable No Vigentes ($)': m.MontoRechazadoIncobrable,
       'Monto Pagado por Inst. de Salud en Falsos Rechazos ($)': m.MontoFalsoRechazoSalud,
@@ -675,6 +714,12 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
   // Filtrar y ordenar el detalle de licencias dentro del Modal
   const registrosDetalleFiltrados = registrosDetalle
     .filter(r => {
+      if (filtroEstadoDet === 'no-rechazadas' && r.Rechazo) return false;
+      if (filtroEstadoDet === 'mayor' && r.GrupoCuadratura !== 'MAYOR') return false;
+      if (filtroEstadoDet === 'exacta' && r.GrupoCuadratura !== 'EXACTA') return false;
+      if (filtroEstadoDet === 'menor-total' && !['MENOR_SALDADA', 'MENOR_PARCIAL', 'MENOR_SIN_PAGO'].includes(r.GrupoCuadratura)) return false;
+      if (filtroEstadoDet === 'menor-saldada' && r.GrupoCuadratura !== 'MENOR_SALDADA') return false;
+      if (filtroEstadoDet === 'menor-parcial' && r.GrupoCuadratura !== 'MENOR_PARCIAL') return false;
       if (filtroEstadoDet === 'por-cobrar' && !(r.EscenarioCobro === 'POR_COBRAR_SALUD' && !r.Rechazo)) return false;
       if (filtroEstadoDet === 'sin-pago' && !(Number(r.MontoPagado || 0) === 0 && !r.Rechazo && !r.EsSaldadaSalud)) return false;
       if (filtroEstadoDet === 'pagadas' && !(r.EsSaldadaSalud && !r.Rechazo)) return false;
@@ -948,113 +993,172 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
               )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Tarjeta 1: Total Licencias Convenio */}
-              <div
-                onClick={() => abrirModalDetalle(mesSeleccionado, 'todas')}
-                className="bg-[#f8fafc] hover:bg-sky-50/70 cursor-pointer transition-all rounded-xl p-4 border border-[#cbd5e1] border-l-4 border-l-[#016098] flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#475569] uppercase">Total Licencias Convenio</span>
-                    <span className="text-[11px] font-bold text-[#016098] bg-sky-100 px-2 py-0.5 rounded">
-                      Ver todas →
+            {(() => {
+              const baseEst = Number(kpiActivo.EstimadoNoRechazado || 0);
+              const pctOfEst = (val: number) =>
+                baseEst > 0 ? ((Number(val || 0) / baseEst) * 100).toFixed(1) : '0.0';
+              const pctCubierto = pctOfEst(kpiActivo.EstimadoCubiertoReal);
+              const pctDeltaSaldado = pctOfEst(kpiActivo.MenorSaldadaDeltaDefinitivo);
+              const pctFalta = pctOfEst(kpiActivo.FaltaPorCobrar);
+              const pctDeltaMas = pctOfEst(kpiActivo.MayorDeltaMas);
+              const pctBruto = pctOfEst(kpiActivo.PagadoNoRechazado);
+
+              return (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* Tarjeta 1: Pago Estimado (No Rechazadas) — Universo Base 100% */}
+                    <div
+                      onClick={() => abrirModalDetalle(mesSeleccionado, 'no-rechazadas')}
+                      className="bg-[#f8fafc] hover:bg-sky-50/70 cursor-pointer transition-all rounded-xl p-4 border border-[#cbd5e1] border-l-4 border-l-[#016098] flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-bold text-[#016098] uppercase">1. Pago Estimado (No Rech.)</span>
+                          <span className="text-[11px] font-extrabold text-white bg-[#016098] px-2 py-0.5 rounded-full">
+                            100% Base
+                          </span>
+                        </div>
+                        <div className="flex items-baseline justify-between mt-1.5">
+                          <p className="text-2xl font-extrabold text-[#016098]">
+                            {formatCLP(kpiActivo.EstimadoNoRechazado)}
+                          </p>
+                          <span className="text-xs font-bold text-[#475569]">
+                            {licenciasNoRechazadasCant.toLocaleString('es-CL')} lic.
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-2 border-t border-slate-200 flex justify-between text-[11px] text-[#475569]">
+                        <span>
+                          Total Convenio ({Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')}):{' '}
+                          <b>{formatCLP(kpiActivo.TotalEstimado)}</b>
+                        </span>
+                        <span>
+                          Rech. ({Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')}):{' '}
+                          <b className="text-rose-600">{formatCLP(kpiActivo.MontoRechazado)}</b>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Tarjeta 2: Estimado Cubierto Real (Sin inflar con sobrepagos) */}
+                    <div
+                      onClick={() => abrirModalDetalle(mesSeleccionado, 'pagadas')}
+                      className="bg-emerald-50/60 hover:bg-emerald-100/60 cursor-pointer transition-all rounded-xl p-4 border border-emerald-200 border-l-4 border-l-emerald-600 flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-bold text-emerald-900 uppercase">2. Estimado Cubierto Real</span>
+                          <span className="text-xs font-extrabold text-emerald-900 bg-emerald-200/90 px-2.5 py-0.5 rounded-full">
+                            {pctCubierto}% del Est.
+                          </span>
+                        </div>
+                        <p className="text-2xl font-extrabold text-emerald-700 mt-1.5">
+                          {formatCLP(kpiActivo.EstimadoCubiertoReal)}
+                        </p>
+                      </div>
+                      <div className="mt-3 pt-2 border-t border-emerald-200 text-[11px] text-emerald-950 flex justify-between">
+                        <span>
+                          Bruto: <b>{formatCLP(kpiActivo.PagadoNoRechazado)}</b> ({pctBruto}%)
+                        </span>
+                        <span title="El excedente recibido de más se informa pero no se suma al estimado original">
+                          Delta +: <b className="text-teal-700">+{formatCLP(kpiActivo.MayorDeltaMas)}</b> (+{pctDeltaMas}%)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Tarjeta 3: Delta en Contra en Licencias Ya Saldadas (No llegará otro pago -> Queda en $0) */}
+                    <div
+                      onClick={() => abrirModalDetalle(mesSeleccionado, 'menor-saldada')}
+                      className="bg-purple-50/60 hover:bg-purple-100/60 cursor-pointer transition-all rounded-xl p-4 border border-purple-200 border-l-4 border-l-purple-600 flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-bold text-purple-900 uppercase">3. Delta Menos (Ya Saldadas)</span>
+                          <span className="text-xs font-extrabold text-purple-900 bg-purple-200/90 px-2.5 py-0.5 rounded-full">
+                            {pctDeltaSaldado}% del Est.
+                          </span>
+                        </div>
+                        <div className="flex items-baseline justify-between mt-1.5">
+                          <p className="text-2xl font-extrabold text-purple-700">
+                            {formatCLP(kpiActivo.MenorSaldadaDeltaDefinitivo)}
+                          </p>
+                          <span className="text-[11px] font-bold text-purple-800">
+                            {Number(kpiActivo.MenorSaldadaCant || 0).toLocaleString('es-CL')} lic. en $0
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-2 border-t border-purple-200 text-[11px] text-purple-950 flex justify-between">
+                        <span>Est: <b>{formatCLP(kpiActivo.MenorSaldadaEstimado)}</b></span>
+                        <span>Rec: <b>{formatCLP(kpiActivo.MenorSaldadaRecibido)}</b> (Cerradas)</span>
+                      </div>
+                    </div>
+
+                    {/* Tarjeta 4: Falta por Cobrar Real (Sí llegará otro pago: Parcial Abierto + Sin Pago) */}
+                    <div
+                      onClick={() => abrirModalDetalle(mesSeleccionado, 'por-cobrar')}
+                      className="bg-amber-50/70 hover:bg-amber-100/70 cursor-pointer transition-all rounded-xl p-4 border border-amber-200 border-l-4 border-l-amber-500 flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-bold text-amber-900 uppercase">4. Falta Cobrar Real (Pend.)</span>
+                          <span className="text-xs font-extrabold text-amber-900 bg-amber-200/90 px-2.5 py-0.5 rounded-full">
+                            {pctFalta}% del Est.
+                          </span>
+                        </div>
+                        <div className="flex items-baseline justify-between mt-1.5">
+                          <p className="text-2xl font-extrabold text-amber-700">
+                            {formatCLP(kpiActivo.FaltaPorCobrar)}
+                          </p>
+                          <span className="text-[11px] font-bold text-amber-900">
+                            {Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic. →
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-2 border-t border-amber-200 text-[11px] text-amber-950 flex justify-between">
+                        <span>
+                          Parcial ({Number(kpiActivo.MenorParcialCant || 0)}): <b>{formatCLP(kpiActivo.MenorParcialFalta)}</b>
+                        </span>
+                        <span>
+                          En $0 ({Number(kpiActivo.MenorSinPagoCant || 0).toLocaleString('es-CL')}): <b>{formatCLP(kpiActivo.MenorSinPagoFalta)}</b>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* BARRA DE COMPROBACIÓN MATEMÁTICA INMEDIATA */}
+                  <div className="bg-[#016098]/5 border border-[#016098]/20 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 font-bold text-[#016098]">
+                      <span className="px-2 py-0.5 bg-[#016098] text-white rounded text-[10px] uppercase font-extrabold">
+                        Cuadratura Exacta (100% = $0 Dif.)
+                      </span>
+                      <span>
+                        Estimado Cubierto ({formatCLP(kpiActivo.EstimadoCubiertoReal)} · {pctCubierto}%) + Delta Menos Saldado ({formatCLP(kpiActivo.MenorSaldadaDeltaDefinitivo)} · {pctDeltaSaldado}%) + Falta por Cobrar Real ({formatCLP(kpiActivo.FaltaPorCobrar)} · {pctFalta}%) ={' '}
+                        <b className="underline">{formatCLP(kpiActivo.EstimadoNoRechazado)} (100%)</b>
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-semibold text-teal-800 bg-teal-50 px-2.5 py-0.5 rounded border border-teal-200">
+                      ℹ️ Delta a Favor (+{formatCLP(kpiActivo.MayorDeltaMas)} · +{pctDeltaMas}% en {Number(kpiActivo.MayorCant || 0).toLocaleString('es-CL')} lic.) es informativo y no se suma al estimado
                     </span>
                   </div>
-                  <p className="text-3xl font-extrabold text-[#016098] mt-1.5">
-                    {Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')}
-                  </p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-slate-200 flex justify-between text-xs">
-                  <span className="text-[#334155]">
-                    Válidas/Trámite: <b className="text-emerald-700">{licenciasNoRechazadasCant.toLocaleString('es-CL')}</b>
-                  </span>
-                  <span className="text-[#334155]">
-                    Rechazadas: <b className="text-rose-600">{Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')}</b>
-                  </span>
-                </div>
-              </div>
-
-              {/* Tarjeta 2: Pago Estimado a Recuperar */}
-              <div
-                onClick={() => abrirModalDetalle(mesSeleccionado, 'todas')}
-                className="bg-[#f8fafc] hover:bg-sky-50/70 cursor-pointer transition-all rounded-xl p-4 border border-[#cbd5e1] border-l-4 border-l-[#39BABD] flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#475569] uppercase">Pago Estimado (No Rech.)</span>
-                    <span className="text-[11px] font-semibold text-[#64748b]">Meta Inst. Salud</span>
-                  </div>
-                  <p className="text-2xl font-extrabold text-[#1e293b] mt-1.5">
-                    {formatCLP(kpiActivo.EstimadoNoRechazado)}
-                  </p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-slate-200 text-xs text-[#475569] flex justify-between">
-                  <span>+ Rechazadas: <b className="text-rose-600">{formatCLP(kpiActivo.MontoRechazado)}</b></span>
-                  <span>Total: <b>{formatCLP(kpiActivo.TotalEstimado)}</b></span>
-                </div>
-              </div>
-
-              {/* Tarjeta 3: Pago Recibido de Instituciones de Salud (Real) */}
-              <div
-                onClick={() => abrirModalDetalle(mesSeleccionado, 'pagadas')}
-                className="bg-emerald-50/60 hover:bg-emerald-100/60 cursor-pointer transition-all rounded-xl p-4 border border-emerald-200 border-l-4 border-l-emerald-600 flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-emerald-900 uppercase">Pagado por Inst. de Salud</span>
-                    <span className="text-xs font-extrabold text-emerald-800 bg-emerald-200/80 px-2 py-0.5 rounded-full">
-                      {pctRecuperoSalud}% recup.
-                    </span>
-                  </div>
-                  <p className="text-2xl font-extrabold text-emerald-700 mt-1.5">
-                    {formatCLP(kpiActivo.PagadoSaludTotal)}
-                  </p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-emerald-200 text-xs text-emerald-950 flex justify-between">
-                  <span>Sub: <b>{formatCLP(kpiActivo.PagadoSubsidio)}</b></span>
-                  <span>Apo: <b>{formatCLP(kpiActivo.PagadoAporte)}</b></span>
-                </div>
-              </div>
-
-              {/* Tarjeta 4: Falta por Cobrar a Instituciones de Salud (No Rechazadas) */}
-              <div
-                onClick={() => abrirModalDetalle(mesSeleccionado, 'por-cobrar')}
-                className="bg-amber-50/70 hover:bg-amber-100/70 cursor-pointer transition-all rounded-xl p-4 border border-amber-200 border-l-4 border-l-amber-500 flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-amber-900 uppercase">Falta Cobrar (Inst. de Salud)</span>
-                    <span className="text-[11px] font-bold text-amber-900 bg-amber-200 px-2 py-0.5 rounded">
-                      Ver nómina →
-                    </span>
-                  </div>
-                  <p className="text-2xl font-extrabold text-amber-700 mt-1.5">
-                    {formatCLP(kpiActivo.FaltaPorCobrar)}
-                  </p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-amber-200 text-xs text-amber-950 flex justify-between">
-                  <span>
-                    En $0 sin pago: <b>{Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')} lic.</b>
-                  </span>
-                  <span>
-                    Con saldo: <b>{Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic.</b>
-                  </span>
-                </div>
-              </div>
-            </div>
+                </>
+              );
+            })()}
           </div>
 
-          {/* TARJETÓN RESUMEN EXPLICATIVO ÚNICO: ¿CÓMO SE FORMA Y CUADRA TODO? */}
-          <div className="bg-linear-to-r from-[#f8fafc] to-sky-50/50 rounded-xl p-4 border border-sky-200 shadow-2xs">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-sky-200/80 pb-2.5 mb-3">
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-[#016098] text-white uppercase">
-                  Guía de Cuadratura
-                </span>
-                <h3 className="text-xs font-extrabold text-[#016098] uppercase tracking-wide">
-                  ¿Cómo se forma el total y cómo cuadran las licencias y los montos en {tituloPeriodoActivo}?
-                </h3>
+          {/* 2.5 TABLA DE AUDITORÍA MATEMÁTICA EXACTA: MAYOR AL ESTIMADO vs NETEADAS vs MENOR AL ESTIMADO */}
+          <div className="bg-linear-to-r from-[#f8fafc] to-sky-50/50 rounded-xl p-4 border border-sky-200 shadow-2xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-sky-200/80 pb-2.5">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-[#016098] text-white uppercase">
+                    Auditoría Matemática Real
+                  </span>
+                  <h3 className="text-xs font-extrabold text-[#016098] uppercase tracking-wide">
+                    Desglose Exacto del Pago Estimado (No Rechazadas) en {tituloPeriodoActivo} — Clic en cualquier fila para ver las licencias
+                  </h3>
+                </div>
+                <p className="text-[11px] text-[#475569] mt-0.5">
+                  Explica peso a peso qué ocurrió con las <b>{licenciasNoRechazadasCant.toLocaleString('es-CL')}</b> licencias válidas por <b>{formatCLP(kpiActivo.EstimadoNoRechazado)}</b>.
+                </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -1074,124 +1178,170 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
-              {/* Columna 1: Cómo se componen las Licencias (Cantidades) */}
-              <div className="bg-white rounded-lg p-3.5 border border-slate-200 space-y-2">
-                <div className="font-extrabold text-[#1e293b] border-b border-slate-100 pb-1.5 flex justify-between items-center">
-                  <span>A. Composición del Universo de Licencias</span>
-                  <span className="text-[#016098]">
-                    Total: {Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')} lic.
-                  </span>
-                </div>
+            <div className="overflow-x-auto bg-white rounded-xl border border-slate-200">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead className="bg-[#f1f5f9] text-[#334155] font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="py-2.5 px-3">Grupo de Auditoría (Sobre Pago Estimado No Rech.)</th>
+                    <th className="py-2.5 px-3 text-right">Licencias</th>
+                    <th className="py-2.5 px-3 text-right">1. Pago Estimado Original ($)</th>
+                    <th className="py-2.5 px-3 text-right">2. Monto Recibido Real ($)</th>
+                    <th className="py-2.5 px-3 text-right bg-emerald-50/70 text-emerald-900">
+                      3. Estimado Cubierto (Topeado a Est.) ($)
+                    </th>
+                    <th className="py-2.5 px-3 text-right bg-teal-50/60 text-teal-900">
+                      4. Delta a Favor (Informativo, no suma)
+                    </th>
+                    <th className="py-2.5 px-3 text-right bg-purple-50/60 text-purple-900">
+                      5A. Delta en Contra Saldado (Queda en $0)
+                    </th>
+                    <th className="py-2.5 px-3 text-right bg-amber-50/70 text-amber-900">
+                      5B. Falta por Cobrar Real (Sí llegará)
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {/* Fila 1: Mayor al Estimado */}
+                  <tr
+                    onClick={() => abrirModalDetalle(mesSeleccionado, 'mayor')}
+                    className="hover:bg-sky-50/60 cursor-pointer transition-colors"
+                  >
+                    <td className="py-2.5 px-3 font-bold text-[#016098]">
+                      1. Licencias con Pago Mayor al Estimado <span className="text-[11px] font-normal text-[#64748b]">(Recibido &gt; Estimado)</span>
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-bold">{Number(kpiActivo.MayorCant || 0).toLocaleString('es-CL')}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold">{formatCLP(kpiActivo.MayorEstimado)}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-emerald-700">{formatCLP(kpiActivo.MayorRecibido)}</td>
+                    <td className="py-2.5 px-3 text-right font-extrabold bg-emerald-50/40 text-emerald-800">
+                      {formatCLP(kpiActivo.MayorEstimado)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-bold bg-teal-50/40 text-teal-700">
+                      +{formatCLP(kpiActivo.MayorDeltaMas)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right text-slate-400">$0</td>
+                    <td className="py-2.5 px-3 text-right text-slate-400">$0</td>
+                  </tr>
 
-                <div className="space-y-1.5 text-[#334155]">
-                  <div className="flex justify-between items-center bg-emerald-50/70 px-2.5 py-1.5 rounded border border-emerald-100">
-                    <span>
-                      <b>1. Licencias Válidas / Autorizadas</b> (Sin marca de rechazo):
-                    </span>
-                    <b className="text-emerald-800">{licenciasNoRechazadasCant.toLocaleString('es-CL')} lic.</b>
-                  </div>
-                  <div className="pl-4 space-y-1 text-[11px] text-[#475569]">
-                    <div className="flex justify-between">
-                      <span>• Saldadas según regla Inst. de Salud (FONASA ≤3d Aporte, &gt;3d Aporte+Subsidio, ISAPRE Pago):</span>
-                      <b className="text-emerald-700">
-                        {Number(kpiActivo.LicenciasPagadas || 0).toLocaleString('es-CL')} lic.
-                      </b>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>• En $0 esperando pago de Inst. de Salud:</span>
-                      <b className="text-amber-700">
-                        {Number(kpiActivo.LicenciasSinPago || 0).toLocaleString('es-CL')} lic.
-                      </b>
-                    </div>
-                    <div className="flex justify-between text-[#016098]">
-                      <span>
-                        ↳ Total Válidas Pendientes <b>Falta por Cobrar a Inst. de Salud</b> (en $0 + FONASA &gt;3d incompleto):
-                      </span>
-                      <b>{Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic.</b>
-                    </div>
-                  </div>
+                  {/* Fila 2: Neteadas / Cuadradas */}
+                  <tr
+                    onClick={() => abrirModalDetalle(mesSeleccionado, 'exacta')}
+                    className="hover:bg-sky-50/60 cursor-pointer transition-colors"
+                  >
+                    <td className="py-2.5 px-3 font-bold text-emerald-800">
+                      2. Licencias Neteadas / Cuadradas Exactas <span className="text-[11px] font-normal text-[#64748b]">(Recibido = Estimado, Delta $0)</span>
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-bold">{Number(kpiActivo.ExactaCant || 0).toLocaleString('es-CL')}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold">{formatCLP(kpiActivo.ExactaEstimado)}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-emerald-700">{formatCLP(kpiActivo.ExactaRecibido)}</td>
+                    <td className="py-2.5 px-3 text-right font-extrabold bg-emerald-50/40 text-emerald-800">
+                      {formatCLP(kpiActivo.ExactaRecibido)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right text-slate-400">$0</td>
+                    <td className="py-2.5 px-3 text-right text-slate-400">$0</td>
+                    <td className="py-2.5 px-3 text-right text-slate-400">$0</td>
+                  </tr>
 
-                  <div className="flex justify-between items-center bg-rose-50/70 px-2.5 py-1.5 rounded border border-rose-100 mt-2">
-                    <span>
-                      <b>2. Licencias Marcadas como Rechazadas</b> (Rechazo = 1):
-                    </span>
-                    <b className="text-rose-700">
-                      {Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} lic.
-                    </b>
-                  </div>
-                  <div className="pl-4 space-y-1 text-[11px] text-[#475569]">
-                    <div className="flex justify-between">
-                      <span>• Con saldo por descontar a Funcionario Vigente (Recuperables):</span>
-                      <b className="text-indigo-700">
-                        {Number(kpiActivo.RechazadasRecuperablesCant || 0).toLocaleString('es-CL')} lic.
-                      </b>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>• Con saldo de Ex-Funcionario No Vigente (Incobrables):</span>
-                      <b className="text-rose-700">
-                        {Number(kpiActivo.RechazadasIncobrablesCant || 0).toLocaleString('es-CL')} lic.
-                      </b>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>• Recuperadas por Descuento al Funcionario ({Number(kpiActivo.RechazadasRecuperadasDescCant || 0)} lic.):</span>
-                      <b className="text-teal-700">
-                        {(
-                          Number(kpiActivo.LicenciasRechazadas || 0) -
-                          Number(kpiActivo.RechazadasRecuperablesCant || 0) -
-                          Number(kpiActivo.RechazadasIncobrablesCant || 0)
-                        ).toLocaleString('es-CL')}{' '}
-                        lic. saldadas
-                      </b>
-                    </div>
-                  </div>
-                </div>
-              </div>
+                  {/* Fila 3 (Subtítulo): Total Menor al Estimado */}
+                  <tr
+                    onClick={() => abrirModalDetalle(mesSeleccionado, 'menor-total')}
+                    className="bg-slate-50/80 hover:bg-sky-50/60 cursor-pointer transition-colors font-semibold"
+                  >
+                    <td className="py-2 px-3 font-bold text-[#1e293b]">
+                      3. Total Licencias con Pago Menor al Estimado <span className="text-[11px] font-normal text-[#64748b]">(Recibido &lt; Estimado — Delta en Contra: -{formatCLP(kpiActivo.MenorTotalDeltaMenos)})</span>
+                    </td>
+                    <td className="py-2 px-3 text-right font-bold">{Number(kpiActivo.MenorTotalCant || 0).toLocaleString('es-CL')}</td>
+                    <td className="py-2 px-3 text-right">{formatCLP(kpiActivo.MenorTotalEstimado)}</td>
+                    <td className="py-2 px-3 text-right text-emerald-700">{formatCLP(kpiActivo.MenorTotalRecibido)}</td>
+                    <td className="py-2 px-3 text-right bg-emerald-50/40 text-emerald-800">{formatCLP(kpiActivo.MenorTotalRecibido)}</td>
+                    <td className="py-2 px-3 text-right text-slate-400">$0</td>
+                    <td className="py-2 px-3 text-right bg-purple-50/40 text-purple-800 font-bold">
+                      {formatCLP(kpiActivo.MenorSaldadaDeltaDefinitivo)}
+                    </td>
+                    <td className="py-2 px-3 text-right bg-amber-50/40 text-amber-800 font-bold">
+                      {formatCLP(kpiActivo.FaltaPorCobrar)}
+                    </td>
+                  </tr>
 
-              {/* Columna 2: Cómo cuadran los Montos Financieros ($) */}
-              <div className="bg-white rounded-lg p-3.5 border border-slate-200 space-y-2">
-                <div className="font-extrabold text-[#1e293b] border-b border-slate-100 pb-1.5 flex justify-between items-center">
-                  <span>B. Cuadratura Financiera de Montos ($)</span>
-                  <span className="text-emerald-700">Fórmula de Conciliación</span>
-                </div>
+                  {/* Fila 3A: Menor al Estimado pero Ya Saldadas (No llegará otro pago -> Queda en $0) */}
+                  <tr
+                    onClick={() => abrirModalDetalle(mesSeleccionado, 'menor-saldada')}
+                    className="hover:bg-purple-50/40 cursor-pointer transition-colors text-[11px]"
+                  >
+                    <td className="py-2 pl-7 pr-3 text-purple-950">
+                      ↳ <b>3A. Ya Saldadas con Menor Pago</b> (Regla FONASA/ISAPRE cumplida: <b>no llegará otro pago</b>, queda en $0 por cobrar)
+                    </td>
+                    <td className="py-2 px-3 text-right font-semibold">{Number(kpiActivo.MenorSaldadaCant || 0).toLocaleString('es-CL')}</td>
+                    <td className="py-2 px-3 text-right">{formatCLP(kpiActivo.MenorSaldadaEstimado)}</td>
+                    <td className="py-2 px-3 text-right text-emerald-700">{formatCLP(kpiActivo.MenorSaldadaRecibido)}</td>
+                    <td className="py-2 px-3 text-right bg-emerald-50/30">{formatCLP(kpiActivo.MenorSaldadaRecibido)}</td>
+                    <td className="py-2 px-3 text-right text-slate-400">$0</td>
+                    <td className="py-2 px-3 text-right font-extrabold bg-purple-50/60 text-purple-800">
+                      {formatCLP(kpiActivo.MenorSaldadaDeltaDefinitivo)}
+                    </td>
+                    <td className="py-2 px-3 text-right text-slate-400">$0</td>
+                  </tr>
 
-                <div className="space-y-1.5 text-[#334155]">
-                  <div className="flex justify-between items-center text-[11px]">
-                    <span>Pago Estimado Total ({Number(kpiActivo.TotalLicencias || 0).toLocaleString('es-CL')} lic., usa MontoDesc si Estimado=0):</span>
-                    <b>{formatCLP(kpiActivo.TotalEstimado)}</b>
-                  </div>
-                  <div className="flex justify-between items-center text-[11px] text-rose-700">
-                    <span>(-) Menos Estimado de Licencias Rechazadas ({Number(kpiActivo.LicenciasRechazadas || 0).toLocaleString('es-CL')} lic.):</span>
-                    <b>- {formatCLP(kpiActivo.MontoRechazado)}</b>
-                  </div>
-                  <div className="flex justify-between items-center bg-sky-50 px-2.5 py-1.5 rounded border border-sky-200 font-bold text-[#016098]">
-                    <span>(=) Meta Estimada a Cobrar a Inst. de Salud (No Rechazadas):</span>
-                    <span>{formatCLP(kpiActivo.EstimadoNoRechazado)}</span>
-                  </div>
+                  {/* Fila 3B: Pago Parcial Abierto (Sí llegará otro delta) */}
+                  <tr
+                    onClick={() => abrirModalDetalle(mesSeleccionado, 'menor-parcial')}
+                    className="hover:bg-amber-50/40 cursor-pointer transition-colors text-[11px]"
+                  >
+                    <td className="py-2 pl-7 pr-3 text-amber-950">
+                      ↳ <b>3B. Pago Parcial Abierto</b> (Ej. FONASA &gt; 3 días con un solo pago: <b>sí llegará otro delta</b>)
+                    </td>
+                    <td className="py-2 px-3 text-right font-semibold">{Number(kpiActivo.MenorParcialCant || 0).toLocaleString('es-CL')}</td>
+                    <td className="py-2 px-3 text-right">{formatCLP(kpiActivo.MenorParcialEstimado)}</td>
+                    <td className="py-2 px-3 text-right text-emerald-700">{formatCLP(kpiActivo.MenorParcialRecibido)}</td>
+                    <td className="py-2 px-3 text-right bg-emerald-50/30">{formatCLP(kpiActivo.MenorParcialRecibido)}</td>
+                    <td className="py-2 px-3 text-right text-slate-400">$0</td>
+                    <td className="py-2 px-3 text-right text-slate-400">$0</td>
+                    <td className="py-2 px-3 text-right font-extrabold bg-amber-50/60 text-amber-800">
+                      {formatCLP(kpiActivo.MenorParcialFalta)}
+                    </td>
+                  </tr>
 
-                  <div className="pl-3 space-y-1 text-[11px] border-l-2 border-emerald-400 my-1">
-                    <div className="flex justify-between font-bold text-emerald-900 bg-emerald-50/70 px-2 py-0.5 rounded">
-                      <span>(=) Total Pagado por Inst. de Salud (Exclusivamente Subsidio + Aporte):</span>
-                      <span>{formatCLP(kpiActivo.PagadoSaludTotal)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>• Del cual: Autorizadas por Pago de Inst. de Salud ({Number(kpiActivo.AutorizadasPorPagoSaludCant || kpiActivo.FalsosRechazosPagadosCant || 0)} lic. `AUT_PAGO_SALUD`):</span>
-                      <b className="text-emerald-700">{formatCLP(kpiActivo.MontoAutorizadasPorPagoSalud || kpiActivo.MontoFalsoRechazoSalud)}</b>
-                    </div>
-                    <div className="flex justify-between text-amber-800 pt-0.5">
-                      <span>• Falta por Cobrar a Inst. de Salud ({Number(kpiActivo.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic. pendientes según regla):</span>
-                      <b>{formatCLP(kpiActivo.FaltaPorCobrar)}</b>
-                    </div>
-                  </div>
+                  {/* Fila 3C: Sin Pago Aún ($0) */}
+                  <tr
+                    onClick={() => abrirModalDetalle(mesSeleccionado, 'sin-pago')}
+                    className="hover:bg-amber-50/40 cursor-pointer transition-colors text-[11px]"
+                  >
+                    <td className="py-2 pl-7 pr-3 text-amber-950">
+                      ↳ <b>3C. Sin Pago Aún ($0 recibido)</b> (Pendientes del 100% de su estimado: <b>sí llegará pago</b>)
+                    </td>
+                    <td className="py-2 px-3 text-right font-semibold">{Number(kpiActivo.MenorSinPagoCant || 0).toLocaleString('es-CL')}</td>
+                    <td className="py-2 px-3 text-right">{formatCLP(kpiActivo.MenorSinPagoEstimado)}</td>
+                    <td className="py-2 px-3 text-right text-slate-400">$0</td>
+                    <td className="py-2 px-3 text-right bg-emerald-50/30 text-slate-400">$0</td>
+                    <td className="py-2 px-3 text-right text-slate-400">$0</td>
+                    <td className="py-2 px-3 text-right text-slate-400">$0</td>
+                    <td className="py-2 px-3 text-right font-extrabold bg-amber-50/60 text-amber-800">
+                      {formatCLP(kpiActivo.MenorSinPagoFalta)}
+                    </td>
+                  </tr>
 
-                  <div className="flex justify-between items-center bg-teal-50/80 px-2.5 py-1.5 rounded border border-teal-200 text-[11px] text-teal-950">
-                    <span>
-                      <b>Aparte — Recuperado por Descuento a Funcionarios en Lic. Rechazadas</b> (Excluye Devoluciones):
-                    </span>
-                    <b className="text-teal-800">{formatCLP(kpiActivo.PagadoDescuentoFunc)}</b>
-                  </div>
-                </div>
-              </div>
+                  {/* Fila Total Cuadratura (1 + 2 + 3) */}
+                  <tr className="bg-[#f1f5f9] font-extrabold text-[#1e293b] border-t-2 border-slate-300">
+                    <td className="py-2.5 px-3 text-[#016098]">
+                      TOTAL CUADRATURA (1 + 2 + 3A + 3B + 3C)
+                    </td>
+                    <td className="py-2.5 px-3 text-right">{licenciasNoRechazadasCant.toLocaleString('es-CL')}</td>
+                    <td className="py-2.5 px-3 text-right text-[#016098]">{formatCLP(kpiActivo.EstimadoNoRechazado)}</td>
+                    <td className="py-2.5 px-3 text-right text-emerald-700">{formatCLP(kpiActivo.PagadoNoRechazado)}</td>
+                    <td className="py-2.5 px-3 text-right bg-emerald-100/70 text-emerald-900">
+                      {formatCLP(kpiActivo.EstimadoCubiertoReal)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right bg-teal-100/60 text-teal-900">
+                      +{formatCLP(kpiActivo.MayorDeltaMas)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right bg-purple-100/60 text-purple-900">
+                      {formatCLP(kpiActivo.MenorSaldadaDeltaDefinitivo)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right bg-amber-100/70 text-amber-900">
+                      {formatCLP(kpiActivo.FaltaPorCobrar)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -1366,9 +1516,10 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                     contentStyle={{ borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '12px' }}
                   />
                   <Legend wrapperStyle={{ fontSize: '12px' }} />
-                  <Bar dataKey="EstimadoNoRechazado" name="Estimado No Rechazadas ($)" fill="#016098" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="PagadoSaludTotal" name="Pagado por Inst. de Salud ($)" fill="#10b981" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="FaltaPorCobrar" name="Falta por Cobrar Inst. Salud ($)" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="EstimadoNoRechazado" name="1. Estimado No Rech. ($)" fill="#016098" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="EstimadoCubiertoReal" name="2. Estimado Cubierto Real ($)" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="MenorSaldadaDeltaDefinitivo" name="3. Delta Menos Saldado en $0 ($)" fill="#9333ea" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="FaltaPorCobrar" name="4. Falta Cobrar Real ($)" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -1379,25 +1530,27 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
               <thead className="bg-[#f1f5f9] text-[#475569] font-bold">
                 <tr>
                   <th className="p-2.5">Mes</th>
-                  <th className="p-2.5 text-center">Lic. Tramitadas</th>
-                  <th className="p-2.5 text-right">Estimado (No Rech.)</th>
-                  <th className="p-2.5 text-right">Pagado Inst. Salud</th>
-                  <th className="p-2.5 text-right">Falta Cobrar Inst. Salud</th>
-                  <th className="p-2.5 text-right">Recup. Desc. Func.</th>
-                  <th className="p-2.5 text-center">Rechazadas (Vig. / Incob.)</th>
+                  <th className="p-2.5 text-center">Lic. Válidas</th>
+                  <th className="p-2.5 text-right text-[#016098]">1. Estimado (No Rech.)</th>
+                  <th className="p-2.5 text-right bg-emerald-50/60 text-emerald-900">2. Estimado Cubierto</th>
+                  <th className="p-2.5 text-right bg-purple-50/60 text-purple-900">3. Delta Menos Saldado ($0)</th>
+                  <th className="p-2.5 text-right bg-amber-50/60 text-amber-900">4. Falta Cobrar Real</th>
+                  <th className="p-2.5 text-right text-teal-800">Info: Delta a Favor (+)</th>
+                  <th className="p-2.5 text-center">Rechazadas</th>
                   <th className="p-2.5 text-center">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#e2e8f0]">
                 {cargando ? (
                   <tr>
-                    <td colSpan={8} className="p-6 text-center text-[#64748b]">
+                    <td colSpan={9} className="p-6 text-center text-[#64748b]">
                       Calculando resumen mensual...
                     </td>
                   </tr>
                 ) : (
                   mesesData.map(m => {
                     const activo = mesSeleccionado === m.Mes;
+                    const licValidasMes = Number(m.LicenciasNoRechazadasCant ?? (m.TotalLicencias - m.LicenciasRechazadas));
                     return (
                       <tr
                         key={m.Mes}
@@ -1407,24 +1560,31 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                         }`}
                       >
                         <td className="p-2.5 font-bold text-[#016098]">{m.MesNombre}</td>
-                        <td className="p-2.5 text-center font-bold">{m.TotalLicencias.toLocaleString('es-CL')}</td>
-                        <td className="p-2.5 text-right font-semibold">{formatCLP(m.EstimadoNoRechazado)}</td>
-                        <td className="p-2.5 text-right font-bold text-emerald-700">{formatCLP(m.PagadoSaludTotal)}</td>
-                        <td className="p-2.5 text-right font-bold text-amber-700">{formatCLP(m.FaltaPorCobrar)}</td>
-                        <td className="p-2.5 text-right font-semibold text-indigo-700">
-                          {formatCLP(m.PagadoDescuentoFunc)}
+                        <td className="p-2.5 text-center font-bold">{licValidasMes.toLocaleString('es-CL')}</td>
+                        <td className="p-2.5 text-right font-bold text-[#016098]">{formatCLP(m.EstimadoNoRechazado)}</td>
+                        <td className="p-2.5 text-right font-bold bg-emerald-50/30 text-emerald-700">
+                          {formatCLP(m.EstimadoCubiertoReal ?? m.PagadoSaludTotal)}
+                        </td>
+                        <td className="p-2.5 text-right font-bold bg-purple-50/30 text-purple-700">
+                          {formatCLP(m.MenorSaldadaDeltaDefinitivo || 0)}
+                        </td>
+                        <td className="p-2.5 text-right font-bold bg-amber-50/30 text-amber-700">
+                          {formatCLP(m.FaltaPorCobrar)}
+                        </td>
+                        <td className="p-2.5 text-right font-semibold text-teal-700">
+                          +{formatCLP(m.MayorDeltaMas || 0)}
                         </td>
                         <td className="p-2.5 text-center">
                           <span className="font-bold text-slate-700">{m.LicenciasRechazadas}</span>{' '}
                           <span className="text-[11px] text-[#64748b]">
-                            (<span className="text-indigo-700 font-bold">{m.RechazadasRecuperablesCant}</span> vig. /{' '}
-                            <span className="text-rose-700 font-bold">{m.RechazadasIncobrablesCant}</span> incob.)
+                            (<span className="text-indigo-700 font-bold">{m.RechazadasRecuperablesCant}</span>v/{' '}
+                            <span className="text-rose-700 font-bold">{m.RechazadasIncobrablesCant}</span>i)
                           </span>
                         </td>
                         <td className="p-2.5 text-center" onClick={e => e.stopPropagation()}>
                           <button
                             type="button"
-                            onClick={() => abrirModalDetalle(m.Mes, 'todas')}
+                            onClick={() => abrirModalDetalle(m.Mes, 'no-rechazadas')}
                             className="px-3 py-1 bg-[#016098] hover:bg-[#014b78] text-white text-[11px] font-bold rounded-md transition-colors"
                           >
                             Abrir Detalle
@@ -1438,20 +1598,32 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                 {totalesAnuales && !cargando && (
                   <tr className="bg-[#f1f5f9] font-extrabold text-[#1e293b] border-t-2 border-[#cbd5e1]">
                     <td className="p-2.5 text-[#016098]">TOTAL {esHistorico ? 'HISTÓRICO' : anio}</td>
-                    <td className="p-2.5 text-center">{totalesAnuales.TotalLicencias.toLocaleString('es-CL')}</td>
-                    <td className="p-2.5 text-right">{formatCLP(totalesAnuales.EstimadoNoRechazado)}</td>
-                    <td className="p-2.5 text-right text-emerald-700">{formatCLP(totalesAnuales.PagadoSaludTotal)}</td>
-                    <td className="p-2.5 text-right text-amber-700">{formatCLP(totalesAnuales.FaltaPorCobrar)}</td>
-                    <td className="p-2.5 text-right text-indigo-700">{formatCLP(totalesAnuales.PagadoDescuentoFunc)}</td>
+                    <td className="p-2.5 text-center">
+                      {Number(
+                        totalesAnuales.LicenciasNoRechazadasCant ??
+                          totalesAnuales.TotalLicencias - totalesAnuales.LicenciasRechazadas
+                      ).toLocaleString('es-CL')}
+                    </td>
+                    <td className="p-2.5 text-right text-[#016098]">{formatCLP(totalesAnuales.EstimadoNoRechazado)}</td>
+                    <td className="p-2.5 text-right bg-emerald-100/50 text-emerald-800">
+                      {formatCLP(totalesAnuales.EstimadoCubiertoReal ?? totalesAnuales.PagadoSaludTotal)}
+                    </td>
+                    <td className="p-2.5 text-right bg-purple-100/50 text-purple-800">
+                      {formatCLP(totalesAnuales.MenorSaldadaDeltaDefinitivo || 0)}
+                    </td>
+                    <td className="p-2.5 text-right bg-amber-100/50 text-amber-800">
+                      {formatCLP(totalesAnuales.FaltaPorCobrar)}
+                    </td>
+                    <td className="p-2.5 text-right text-teal-800">+{formatCLP(totalesAnuales.MayorDeltaMas || 0)}</td>
                     <td className="p-2.5 text-center">
                       {totalesAnuales.LicenciasRechazadas.toLocaleString('es-CL')} (
-                      <span className="text-indigo-700">{totalesAnuales.RechazadasRecuperablesCant.toLocaleString('es-CL')}</span> vig. /{' '}
-                      <span className="text-rose-700">{totalesAnuales.RechazadasIncobrablesCant.toLocaleString('es-CL')}</span> incob.)
+                      <span className="text-indigo-700">{totalesAnuales.RechazadasRecuperablesCant.toLocaleString('es-CL')}</span>v/{' '}
+                      <span className="text-rose-700">{totalesAnuales.RechazadasIncobrablesCant.toLocaleString('es-CL')}</span>i)
                     </td>
                     <td className="p-2.5 text-center">
                       <button
                         type="button"
-                        onClick={() => abrirModalDetalle(0, 'todas')}
+                        onClick={() => abrirModalDetalle(0, 'no-rechazadas')}
                         className="px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold rounded-md"
                       >
                         Abrir Todo ({esHistorico ? 'Histórico' : anio})
@@ -1569,10 +1741,29 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
             <div className="px-6 py-3 bg-white border-b border-[#e2e8f0] flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 shrink-0">
               <div className="flex flex-wrap gap-1.5">
                 {[
-                  { id: 'todas', label: `Todas (${registrosDetalle.length})` },
                   {
-                    id: 'pagadas',
-                    label: `✅ Saldadas Inst. Salud (${registrosDetalle.filter(r => r.EsSaldadaSalud && !r.Rechazo).length})`
+                    id: 'no-rechazadas',
+                    label: `Válidas No Rech. (${registrosDetalle.filter(r => !r.Rechazo).length})`
+                  },
+                  {
+                    id: 'mayor',
+                    label: `1. Pago Mayor al Est. (${registrosDetalle.filter(r => r.GrupoCuadratura === 'MAYOR').length})`
+                  },
+                  {
+                    id: 'exacta',
+                    label: `2. Neteadas $0 (${registrosDetalle.filter(r => r.GrupoCuadratura === 'EXACTA').length})`
+                  },
+                  {
+                    id: 'menor-saldada',
+                    label: `3A. Menor Ya Saldada en $0 (${registrosDetalle.filter(r => r.GrupoCuadratura === 'MENOR_SALDADA').length})`
+                  },
+                  {
+                    id: 'menor-parcial',
+                    label: `3B. Pago Parcial Abierto (${registrosDetalle.filter(r => r.GrupoCuadratura === 'MENOR_PARCIAL').length})`
+                  },
+                  {
+                    id: 'sin-pago',
+                    label: `3C. Sin Pago $0 (${registrosDetalle.filter(r => r.GrupoCuadratura === 'MENOR_SIN_PAGO').length})`
                   },
                   {
                     id: 'por-cobrar',

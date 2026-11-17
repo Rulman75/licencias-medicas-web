@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
-import ControlConvenioMensual from '../components/ControlConvenioMensual';
 import { exportToExcel, exportToCorporatePDF } from '../utils/exportUtils';
 import {
   PieChart,
@@ -90,6 +89,8 @@ interface DashboardData {
 export default function Inicio() {
   const currentYear = String(new Date().getFullYear());
   const [stats, setStats] = useState<DashboardData | null>(null);
+  const [cuadratura, setCuadratura] = useState<any>(null);
+  const [sectorCuadratura, setSectorCuadratura] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [year, setYear] = useState(currentYear);
   const [tipoUsuario, setTipoUsuario] = useState('A');
@@ -104,15 +105,27 @@ export default function Inicio() {
     }
   }, []);
 
-  const fetchStats = async (selectedYear = year) => {
+  const fetchStats = async (selectedYear = year, selectedSector = sectorCuadratura) => {
     setLoading(true);
     try {
       const url = selectedYear
         ? `/api/dashboard/inicio-stats?year=${selectedYear}`
         : '/api/dashboard/inicio-stats';
-      const res = await axios.get(url);
+      const [res, resCuad] = await Promise.all([
+        axios.get(url),
+        axios.get('/api/dashboard/convenio-mensual', {
+          params: {
+            year: selectedYear || 'historico',
+            criterio: 'desde',
+            sector: selectedSector
+          }
+        })
+      ]);
       if (res.data.status === 'ok') {
         setStats(res.data.data);
+      }
+      if (resCuad.data && resCuad.data.status === 'ok') {
+        setCuadratura(resCuad.data.totales || null);
       }
     } catch (err) {
       console.error('Error al obtener estadísticas de inicio', err);
@@ -122,8 +135,8 @@ export default function Inicio() {
   };
 
   useEffect(() => {
-    fetchStats(year);
-  }, [year]);
+    fetchStats(year, sectorCuadratura);
+  }, [year, sectorCuadratura]);
 
   const formatCLP = (val: number) =>
     `$${Math.round(Number(val || 0)).toLocaleString('es-CL')}`;
@@ -363,114 +376,204 @@ export default function Inicio() {
               </div>
             </div>
 
-            {/* BLOQUE 2: Resumen Financiero y Recupero de Subsidios (Excluye Pago Directo) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-              {/* Subsidio Estimado */}
-              <div className="bg-white rounded-xl shadow-sm p-5 border border-[#e2e8f0] flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#64748b] uppercase">
-                      Subsidio Estimado (CMDS)
-                    </span>
-                    <span className="text-[10px] font-semibold bg-sky-50 text-[#016098] px-2 py-0.5 rounded border border-sky-200">
-                      Sin Pago Directo
-                    </span>
-                  </div>
-                  <p className="text-2xl font-black text-[#016098] mt-1">
-                    {formatCLP(stats.TotalEstimado)}
-                  </p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-slate-100 text-[11px] text-[#475569] space-y-0.5">
-                  <div className="flex justify-between">
-                    <span>• Convenio ({stats.Convenio.toLocaleString('es-CL')} lic.):</span>
-                    <b className="text-[#016098]">{formatCLP(stats.EstimadoConvenio || 0)}</b>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>• Órdenes Reposo ({stats.Reposo.toLocaleString('es-CL')} lic.):</span>
-                    <b className="text-amber-700">{formatCLP(stats.EstimadoReposo || 0)}</b>
-                  </div>
-                </div>
-              </div>
-
-              {/* Total Recuperado / Pagado */}
-              <div className="bg-white rounded-xl shadow-sm p-5 border border-[#e2e8f0] flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#64748b] uppercase">
-                      Total Recuperado (Pagado)
-                    </span>
-                    <span className="text-xs font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                      {tasaRecupero.toFixed(1)}% recupero
-                    </span>
-                  </div>
-                  <p className="text-2xl font-black text-emerald-600 mt-1">
-                    {formatCLP(stats.TotalPagado)}
-                  </p>
-                </div>
-                <div className="mt-3 pt-2 border-t border-slate-100 text-[11px] text-[#475569] space-y-0.5">
-                  <div className="flex justify-between">
-                    <span>• Convenio:</span>
-                    <b className="text-emerald-700">{formatCLP(stats.PagadoConvenio || 0)}</b>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>• Órdenes Reposo:</span>
-                    <b className="text-emerald-700">{formatCLP(stats.PagadoReposo || 0)}</b>
-                  </div>
-                </div>
-              </div>
-
-              {/* Saldo Pendiente por Recuperar */}
-              <div className="bg-white rounded-xl shadow-sm p-5 border border-[#e2e8f0] flex flex-col justify-between">
-                <div>
-                  <span className="text-xs font-bold text-[#64748b] uppercase">
-                    Diferencia / Por Recuperar
-                  </span>
-                  <p className="text-2xl font-black text-amber-600 mt-1">
-                    {formatCLP(saldoPendiente)}
-                  </p>
-                </div>
-                <p className="text-xs text-[#64748b] mt-3">
-                  <strong className="text-[#1e293b]">
-                    {stats.LicenciasPendientesPago.toLocaleString('es-CL')}
-                  </strong>{' '}
-                  licencias (Convenio + Reposo) en $0 sin rechazo
-                </p>
-              </div>
-
-              {/* Estado de Transferencias / Documentos de Pago */}
-              <div className="bg-white rounded-xl shadow-sm p-5 border border-[#e2e8f0] flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#64748b] uppercase">
-                      Control de Transferencias
-                    </span>
-                    <span className="text-xs font-bold bg-sky-100 text-[#016098] px-2 py-0.5 rounded-full">
-                      {stats.cheques.TotalCheques.toLocaleString('es-CL')} registradas
-                    </span>
-                  </div>
-                  <div className="flex items-baseline gap-4 mt-2">
-                    <div>
-                      <span className="text-xl font-black text-amber-600">
-                        {stats.cheques.ChequesAbiertos.toLocaleString('es-CL')}
+            {/* BLOQUE 2: Resumen Ejecutivo de Cuadratura Matemática (Unificado 100% con Módulo de Auditoría) */}
+            {cuadratura && (
+              <div className="bg-white rounded-xl shadow-sm border border-[#e2e8f0] p-5 space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 border-b border-[#e2e8f0] pb-3.5">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded text-[10px] font-extrabold bg-[#016098] text-white uppercase">
+                        Cuadratura Matemática Exacta
                       </span>
-                      <span className="text-xs text-[#64748b] ml-1">Abiertas</span>
+                      <h2 className="text-base font-extrabold text-[#016098]">
+                        Resumen Financiero Cuadrado de Licencias Convenio ({year ? `Año ${year}` : 'Histórico'})
+                      </h2>
                     </div>
-                    <div>
-                      <span className="text-xl font-black text-emerald-600">
-                        {stats.cheques.ChequesCerrados.toLocaleString('es-CL')}
-                      </span>
-                      <span className="text-xs text-[#64748b] ml-1">Cerradas</span>
+                    <p className="text-xs text-[#64748b] mt-0.5">
+                      Cifras 100% unificadas con el módulo de Auditoría: el Pago Estimado (No Rech.) se explica exactamente entre lo Cubierto Real, el Delta en Contra ya Saldado ($0 por cobrar) y lo que Falta por Cobrar.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <div className="flex items-center gap-1.5 bg-[#f8fafc] border border-[#cbd5e1] rounded-lg px-2.5 py-1.5">
+                      <span className="text-[11px] font-bold text-[#475569] uppercase">Sector:</span>
+                      <select
+                        value={sectorCuadratura}
+                        onChange={e => setSectorCuadratura(e.target.value)}
+                        className="bg-transparent text-xs font-bold text-[#016098] focus:outline-none cursor-pointer"
+                      >
+                        <option value="">Todos (Educación + Salud APS)</option>
+                        <option value="educacion">Sector Educación</option>
+                        <option value="salud">Sector Salud (APS)</option>
+                      </select>
                     </div>
+
+                    <Link
+                      to={`/licencias/auditoria-cuadratura${year ? `?year=${year}` : ''}`}
+                      className="px-3.5 py-2 bg-[#016098] hover:bg-[#014b78] text-white text-xs font-bold rounded-lg shadow-xs transition-colors flex items-center gap-1.5"
+                    >
+                      <span>🔍 Ir a Auditoría, Desglose Mensual y Nóminas</span>
+                      <span>→</span>
+                    </Link>
                   </div>
                 </div>
-                <p className="text-[11px] text-[#64748b] mt-3">
-                  Transferencias y documentos controlados en Ingreso de Pagos
-                </p>
-              </div>
-            </div>
 
-            {/* BLOQUE 2.5: Control Mensual de Licencias con Convenio Tramitadas y Recuperación de Subsidios */}
-            <ControlConvenioMensual initialYear={year || 'historico'} />
+                {/* 4 Tarjetas Cuadradas al Peso con Indicador de Porcentaje sobre el Pago Estimado */}
+                {(() => {
+                  const baseEst = Number(cuadratura.EstimadoNoRechazado || 0);
+                  const pctOfEst = (val: number) =>
+                    baseEst > 0 ? ((Number(val || 0) / baseEst) * 100).toFixed(1) : '0.0';
+                  const pctCubierto = pctOfEst(cuadratura.EstimadoCubiertoReal);
+                  const pctDeltaSaldado = pctOfEst(cuadratura.MenorSaldadaDeltaDefinitivo);
+                  const pctFalta = pctOfEst(cuadratura.FaltaPorCobrar);
+                  const pctDeltaMas = pctOfEst(cuadratura.MayorDeltaMas);
+                  const pctBruto = pctOfEst(cuadratura.PagadoNoRechazado);
+
+                  return (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {/* 1. Pago Estimado (No Rech.) */}
+                        <div className="bg-[#f8fafc] rounded-xl p-4 border border-[#cbd5e1] border-l-4 border-l-[#016098] flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-bold text-[#016098] uppercase">1. Pago Estimado (No Rech.)</span>
+                              <span className="text-[11px] font-extrabold text-white bg-[#016098] px-2 py-0.5 rounded-full">
+                                100% Base
+                              </span>
+                            </div>
+                            <div className="flex items-baseline justify-between mt-1.5">
+                              <p className="text-2xl font-black text-[#016098]">
+                                {formatCLP(cuadratura.EstimadoNoRechazado)}
+                              </p>
+                              <span className="text-xs font-bold text-[#475569]">
+                                {Number(
+                                  cuadratura.LicenciasNoRechazadasCant ??
+                                    cuadratura.TotalLicencias - cuadratura.LicenciasRechazadas
+                                ).toLocaleString('es-CL')}{' '}
+                                lic.
+                              </span>
+                            </div>
+                          </div>
+                          <div className="mt-3 pt-2 border-t border-slate-200 flex justify-between text-[11px] text-[#475569]">
+                            <span>Total Convenio: <b>{formatCLP(cuadratura.TotalEstimado)}</b></span>
+                            <span>Rech.: <b className="text-rose-600">{formatCLP(cuadratura.MontoRechazado)}</b></span>
+                          </div>
+                        </div>
+
+                        {/* 2. Estimado Cubierto Real */}
+                        <div className="bg-emerald-50/60 rounded-xl p-4 border border-emerald-200 border-l-4 border-l-emerald-600 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-bold text-emerald-900 uppercase">2. Estimado Cubierto Real</span>
+                              <span className="text-xs font-extrabold text-emerald-900 bg-emerald-200/90 px-2.5 py-0.5 rounded-full">
+                                {pctCubierto}% del Est.
+                              </span>
+                            </div>
+                            <p className="text-2xl font-black text-emerald-700 mt-1.5">
+                              {formatCLP(cuadratura.EstimadoCubiertoReal)}
+                            </p>
+                          </div>
+                          <div className="mt-3 pt-2 border-t border-emerald-200 text-[11px] text-emerald-950 flex justify-between">
+                            <span>
+                              Bruto: <b>{formatCLP(cuadratura.PagadoNoRechazado)}</b> ({pctBruto}%)
+                            </span>
+                            <span>
+                              Delta +: <b className="text-teal-700">+{formatCLP(cuadratura.MayorDeltaMas)}</b> (+{pctDeltaMas}%)
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* 3. Delta Menos (Ya Saldadas en $0) */}
+                        <div className="bg-purple-50/60 rounded-xl p-4 border border-purple-200 border-l-4 border-l-purple-600 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-bold text-purple-900 uppercase">3. Delta Menos (Ya Saldadas)</span>
+                              <span className="text-xs font-extrabold text-purple-900 bg-purple-200/90 px-2.5 py-0.5 rounded-full">
+                                {pctDeltaSaldado}% del Est.
+                              </span>
+                            </div>
+                            <div className="flex items-baseline justify-between mt-1.5">
+                              <p className="text-2xl font-black text-purple-700">
+                                {formatCLP(cuadratura.MenorSaldadaDeltaDefinitivo)}
+                              </p>
+                              <span className="text-[11px] font-bold text-purple-800">
+                                {Number(cuadratura.MenorSaldadaCant || 0).toLocaleString('es-CL')} lic. en $0
+                              </span>
+                            </div>
+                          </div>
+                          <div className="mt-3 pt-2 border-t border-purple-200 text-[11px] text-purple-950 flex justify-between">
+                            <span>Est: <b>{formatCLP(cuadratura.MenorSaldadaEstimado)}</b></span>
+                            <span>Rec: <b>{formatCLP(cuadratura.MenorSaldadaRecibido)}</b> (Cerradas)</span>
+                          </div>
+                        </div>
+
+                        {/* 4. Falta por Cobrar Real (Sí llegará pago) */}
+                        <div className="bg-amber-50/70 rounded-xl p-4 border border-amber-200 border-l-4 border-l-amber-500 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-bold text-amber-900 uppercase">4. Falta Cobrar Real (Pend.)</span>
+                              <span className="text-xs font-extrabold text-amber-900 bg-amber-200/90 px-2.5 py-0.5 rounded-full">
+                                {pctFalta}% del Est.
+                              </span>
+                            </div>
+                            <div className="flex items-baseline justify-between mt-1.5">
+                              <p className="text-2xl font-black text-amber-700">
+                                {formatCLP(cuadratura.FaltaPorCobrar)}
+                              </p>
+                              <span className="text-[11px] font-bold text-amber-900">
+                                {Number(cuadratura.LicenciasPorCobrarSalud || 0).toLocaleString('es-CL')} lic.
+                              </span>
+                            </div>
+                          </div>
+                          <div className="mt-3 pt-2 border-t border-amber-200 text-[11px] text-amber-950 flex justify-between">
+                            <span>Parcial ({Number(cuadratura.MenorParcialCant || 0)}): <b>{formatCLP(cuadratura.MenorParcialFalta)}</b></span>
+                            <span>En $0 ({Number(cuadratura.MenorSinPagoCant || 0).toLocaleString('es-CL')}): <b>{formatCLP(cuadratura.MenorSinPagoFalta)}</b></span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Ecuación de Cuadratura + Estado de Transferencias */}
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-center pt-1">
+                        <div className="lg:col-span-2 bg-[#016098]/5 border border-[#016098]/20 rounded-xl px-4 py-3 text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                          <div className="text-[#016098] font-bold">
+                            <span className="px-2 py-0.5 bg-[#016098] text-white rounded text-[10px] uppercase font-extrabold mr-2">
+                              Comprobación (100% = $0 Dif.)
+                            </span>
+                            {formatCLP(cuadratura.EstimadoCubiertoReal)} ({pctCubierto}%) + {formatCLP(cuadratura.MenorSaldadaDeltaDefinitivo)} ({pctDeltaSaldado}%) + {formatCLP(cuadratura.FaltaPorCobrar)} ({pctFalta}%) ={' '}
+                            <b className="underline">{formatCLP(cuadratura.EstimadoNoRechazado)} (100%)</b>
+                          </div>
+                          <span className="text-[11px] font-semibold text-teal-800 whitespace-nowrap">
+                            Pago Mayor ({Number(cuadratura.MayorCant || 0).toLocaleString('es-CL')} lic.): +{formatCLP(cuadratura.MayorDeltaMas)} (+{pctDeltaMas}%)
+                          </span>
+                        </div>
+
+                        <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-xl px-4 py-2.5 flex items-center justify-between text-xs">
+                          <div>
+                            <span className="text-[10px] font-bold text-[#64748b] uppercase block">
+                              Control Transferencias ({stats.cheques.TotalCheques.toLocaleString('es-CL')})
+                            </span>
+                            <div className="flex items-center gap-3 mt-0.5">
+                              <span className="font-bold text-amber-600">
+                                {stats.cheques.ChequesAbiertos.toLocaleString('es-CL')} Abiertas
+                              </span>
+                              <span className="font-bold text-emerald-600">
+                                {stats.cheques.ChequesCerrados.toLocaleString('es-CL')} Cerradas
+                              </span>
+                            </div>
+                          </div>
+                          <Link
+                            to="/mantencion/pagos"
+                            className="text-[11px] font-bold text-[#016098] hover:underline"
+                          >
+                            Ver →
+                          </Link>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* BLOQUE 3: Gráficos de Evolución y Distribución */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

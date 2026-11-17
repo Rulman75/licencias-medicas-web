@@ -5,6 +5,7 @@ import Layout from './components/Layout';
 import Inicio from './pages/Inicio';
 import EstadisticasDashboard from './components/EstadisticasDashboard';
 import EstadisticasLicencias from './pages/EstadisticasLicencias';
+import AuditoriaCuadratura from './pages/AuditoriaCuadratura';
 import EstadisticasReposo from './pages/EstadisticasReposo';
 import OtrasLicencias from './pages/OtrasLicencias';
 import OtrasReposo from './pages/OtrasReposo';
@@ -53,6 +54,7 @@ function App() {
           <Route path="informes/general-pagos" element={<InformesLegacy tabInicial="general-pagos" />} />
           <Route path="informes/softland" element={<InformesLegacy tabInicial="softland" />} />
 
+          <Route path="licencias/auditoria-cuadratura" element={<AuditoriaCuadratura />} />
           <Route path="licencias/estadisticas" element={<EstadisticasLicencias />} />
           <Route path="licencias/otras-estadisticas" element={<OtrasLicencias />} />
           <Route path="reposo/estadisticas" element={<EstadisticasReposo />} />
