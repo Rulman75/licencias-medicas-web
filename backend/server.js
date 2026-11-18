@@ -1,11 +1,29 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
 const { getConnection, sql } = require('./db');
+const {
+    JWT_SECRET,
+    BCRYPT_ROUNDS,
+    invalidateUserCache,
+    securityHeadersMiddleware,
+    apiRateLimiter,
+    checkLoginIpRateLimit,
+    recordLoginIpResult,
+    registrarAuditoriaAcceso,
+    ensureSecuritySchema,
+    authenticateJWT,
+    requireRoles
+} = require('./middleware/authMiddleware');
 
 const app = express();
+// Confiar en cabeceras X-Forwarded-For de Nginx Reverse Proxy (DMZ)
+app.set('trust proxy', 1);
+app.use(securityHeadersMiddleware);
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -14,6 +32,11 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3001;
+
+// Inicializar esquema de seguridad y migración Bcrypt al arrancar
+getConnection()
+    .then(pool => ensureSecuritySchema(pool))
+    .catch(err => console.error('[SEGURIDAD] Error inicializando esquema al arranque:', err.message));
 
 app.get('/api/version', (req, res) => {
     try {
@@ -27,24 +50,320 @@ app.get('/api/version', (req, res) => {
             date = execSync('git log -1 --format=%cd --date=short', { cwd: __dirname }).toString().trim();
         } catch {}
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.json({ status: 'ok', version: pkg.version || '2.2.3', commit, date });
+        res.json({ status: 'ok', version: pkg.version || '2.8.0', commit, date });
     } catch (e) {
-        res.json({ status: 'ok', version: '2.2.3', commit: '', date: '' });
+        res.json({ status: 'ok', version: '2.8.0', commit: '', date: '' });
     }
 });
 
-// Simple route to test DB connection
+// Ruta pública de salud (sin exponer detalles internos de BD)
 app.get('/api/health', async (req, res) => {
     try {
-        const pool = await getConnection();
+        await getConnection();
         res.json({ status: 'ok', message: 'Backend is running and connected to DB.' });
     } catch (error) {
-        res.status(500).json({ status: 'error', message: 'DB Connection failed', error: error.message });
+        res.status(500).json({ status: 'error', message: 'DB Connection failed' });
     }
 });
 
-// Inject pool for reposo routes
-app.use('/api/reposo', async (req, res, next) => {
+// Limitador general de tasa para /api/*
+app.use('/api', apiRateLimiter);
+
+// Login endpoint con Bcrypt, bloqueo anti-fuerza bruta y bitácora de auditoría
+app.post('/api/auth/login', checkLoginIpRateLimit, async (req, res) => {
+    const { username, password } = req.body;
+    const uClean = String(username || '').trim();
+    const pClean = String(password || '').trim();
+
+    if (!uClean || !pClean) {
+        return res.status(400).json({ status: 'error', message: 'Usuario y contraseña son requeridos' });
+    }
+
+    try {
+        const pool = await getConnection();
+        const result = await pool
+            .request()
+            .input('user', sql.NVarChar, uClean)
+            .query(`
+                SELECT
+                    LTRIM(RTRIM(Usuario)) as Usuario,
+                    LTRIM(RTRIM(ISNULL(Clave, ''))) as Clave,
+                    LTRIM(RTRIM(ISNULL(PasswordHash, ''))) as PasswordHash,
+                    LTRIM(RTRIM(ISNULL(NombreCompleto, ''))) as NombreCompleto,
+                    LTRIM(RTRIM(ISNULL(Email, ''))) as Email,
+                    LTRIM(RTRIM(ISNULL(Tipo, 'U'))) as Tipo,
+                    LTRIM(RTRIM(ISNULL(Unidad, 'cmds'))) as Unidad,
+                    ISNULL(Activo, 1) as Activo,
+                    ISNULL(DebeCambiarClave, 0) as DebeCambiarClave,
+                    ISNULL(IntentosFallidos, 0) as IntentosFallidos,
+                    BloqueadoHasta
+                FROM Usuarios
+                WHERE LOWER(LTRIM(RTRIM(Usuario))) = LOWER(@user)
+            `);
+
+        if (!result.recordset || result.recordset.length === 0) {
+            recordLoginIpResult(req, false);
+            await registrarAuditoriaAcceso(pool, {
+                usuario: uClean,
+                evento: 'LOGIN_FAIL',
+                detalle: 'Usuario no existe',
+                req,
+                exitoso: false
+            });
+            return res.status(401).json({ status: 'error', message: 'Credenciales inválidas' });
+        }
+
+        const dbUser = result.recordset[0];
+
+        // 1. Verificar si la cuenta está suspendida administrativamente
+        if (Number(dbUser.Activo) !== 1) {
+            await registrarAuditoriaAcceso(pool, {
+                usuario: dbUser.Usuario,
+                evento: 'LOGIN_FAIL',
+                detalle: 'Intento de acceso en cuenta suspendida',
+                req,
+                exitoso: false
+            });
+            return res.status(403).json({
+                status: 'error',
+                message: 'Su cuenta de usuario se encuentra suspendida. Contacte al Administrador del sistema.'
+            });
+        }
+
+        // 2. Verificar si la cuenta tiene bloqueo temporal por intentos fallidos
+        const now = new Date();
+        if (dbUser.BloqueadoHasta) {
+            const lockUntil = new Date(dbUser.BloqueadoHasta);
+            if (!isNaN(lockUntil.getTime()) && lockUntil > now) {
+                const minsLeft = Math.max(1, Math.ceil((lockUntil.getTime() - now.getTime()) / 60000));
+                return res.status(429).json({
+                    status: 'error',
+                    message: `Cuenta bloqueada temporalmente por seguridad tras múltiples intentos fallidos. Intente nuevamente en ${minsLeft} minuto(s) o solicite desbloqueo al Administrador.`
+                });
+            }
+        }
+
+        // 3. Verificar contraseña contra PasswordHash (Bcrypt) o migrar desde Clave legada
+        let passwordValida = false;
+        if (dbUser.PasswordHash && dbUser.PasswordHash.startsWith('$2')) {
+            passwordValida = await bcrypt.compare(pClean, dbUser.PasswordHash);
+        }
+
+        // Fallback de coexistencia: si se actualizó en el sistema legado o aún no tenía hash
+        if (!passwordValida && dbUser.Clave && dbUser.Clave === pClean) {
+            passwordValida = true;
+            const newHash = await bcrypt.hash(pClean, BCRYPT_ROUNDS);
+            await pool
+                .request()
+                .input('Hash', sql.NVarChar, newHash)
+                .input('User', sql.NVarChar, dbUser.Usuario)
+                .query(`UPDATE Usuarios SET PasswordHash = @Hash WHERE LOWER(LTRIM(RTRIM(Usuario))) = LOWER(@User)`);
+        }
+
+        if (!passwordValida) {
+            recordLoginIpResult(req, false);
+            const nuevosIntentos = Number(dbUser.IntentosFallidos || 0) + 1;
+            const bloquear = nuevosIntentos >= 5;
+            const lockUntilDate = bloquear ? new Date(Date.now() + 15 * 60 * 1000) : null;
+
+            await pool
+                .request()
+                .input('Intentos', sql.Int, nuevosIntentos)
+                .input('BloqueadoHasta', sql.DateTime, lockUntilDate)
+                .input('User', sql.NVarChar, dbUser.Usuario)
+                .query(`
+                    UPDATE Usuarios
+                    SET IntentosFallidos = @Intentos,
+                        BloqueadoHasta = @BloqueadoHasta
+                    WHERE LOWER(LTRIM(RTRIM(Usuario))) = LOWER(@User)
+                `);
+
+            await registrarAuditoriaAcceso(pool, {
+                usuario: dbUser.Usuario,
+                evento: bloquear ? 'LOCKOUT' : 'LOGIN_FAIL',
+                detalle: bloquear
+                    ? `Cuenta bloqueada por 15 minutos tras ${nuevosIntentos} intentos fallidos`
+                    : `Contraseña incorrecta (intento ${nuevosIntentos} de 5)`,
+                req,
+                exitoso: false
+            });
+
+            if (bloquear) {
+                return res.status(429).json({
+                    status: 'error',
+                    message: 'Ha superado los 5 intentos fallidos. Su cuenta ha sido bloqueada preventivamente por 15 minutos.'
+                });
+            }
+
+            return res.status(401).json({ status: 'error', message: 'Credenciales inválidas' });
+        }
+
+        // 4. Login exitoso: limpiar contador de fallos y registrar UltimoAcceso
+        recordLoginIpResult(req, true);
+        await pool
+            .request()
+            .input('User', sql.NVarChar, dbUser.Usuario)
+            .query(`
+                UPDATE Usuarios
+                SET IntentosFallidos = 0,
+                    BloqueadoHasta = NULL,
+                    UltimoAcceso = GETDATE()
+                WHERE LOWER(LTRIM(RTRIM(Usuario))) = LOWER(@User)
+            `);
+
+        invalidateUserCache(dbUser.Usuario);
+
+        const userPayload = {
+            Usuario: dbUser.Usuario,
+            NombreCompleto: dbUser.NombreCompleto || dbUser.Usuario,
+            Email: dbUser.Email || '',
+            Tipo: dbUser.Tipo,
+            Unidad: dbUser.Unidad,
+            DebeCambiarClave: Number(dbUser.DebeCambiarClave) === 1
+        };
+
+        const token = jwt.sign(
+            {
+                username: userPayload.Usuario,
+                nombreCompleto: userPayload.NombreCompleto,
+                tipo: userPayload.Tipo,
+                unidad: userPayload.Unidad,
+                debeCambiarClave: userPayload.DebeCambiarClave
+            },
+            JWT_SECRET,
+            { expiresIn: '8h' }
+        );
+
+        await registrarAuditoriaAcceso(pool, {
+            usuario: dbUser.Usuario,
+            evento: 'LOGIN_OK',
+            detalle: `Inicio de sesión exitoso (Rol: ${dbUser.Tipo}, Unidad: ${dbUser.Unidad})`,
+            req,
+            exitoso: true
+        });
+
+        res.json({ status: 'ok', token, user: userPayload });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
+    }
+});
+
+// ============================================================================
+// PROTECCIÓN GLOBAL JWT PARA TODAS LAS RUTAS /api/* A PARTIR DE ESTE PUNTO
+// ============================================================================
+app.use('/api', authenticateJWT);
+
+// Obtener estado actual de la sesión del usuario
+app.get('/api/auth/me', (req, res) => {
+    res.json({
+        status: 'ok',
+        user: req.user
+    });
+});
+
+// Cambio de contraseña por el propio usuario en sesión
+app.post('/api/auth/change-password', async (req, res) => {
+    try {
+        const { passwordActual, passwordNueva } = req.body;
+        const pActual = String(passwordActual || '').trim();
+        const pNueva = String(passwordNueva || '').trim();
+
+        if (!pActual || !pNueva) {
+            return res.status(400).json({ status: 'error', message: 'Debe ingresar su contraseña actual y la nueva contraseña.' });
+        }
+        if (pNueva.length < 6) {
+            return res.status(400).json({ status: 'error', message: 'La nueva contraseña debe tener al menos 6 caracteres.' });
+        }
+        if (pActual === pNueva) {
+            return res.status(400).json({ status: 'error', message: 'La nueva contraseña debe ser diferente a la actual.' });
+        }
+
+        const pool = await getConnection();
+        const dbRes = await pool
+            .request()
+            .input('u', sql.NVarChar, req.user.username)
+            .query(`
+                SELECT
+                    LTRIM(RTRIM(Usuario)) AS Usuario,
+                    LTRIM(RTRIM(ISNULL(Clave, ''))) AS Clave,
+                    LTRIM(RTRIM(ISNULL(PasswordHash, ''))) AS PasswordHash
+                FROM Usuarios
+                WHERE LOWER(LTRIM(RTRIM(Usuario))) = LOWER(@u)
+            `);
+
+        if (!dbRes.recordset || dbRes.recordset.length === 0) {
+            return res.status(404).json({ status: 'error', message: 'Usuario no encontrado.' });
+        }
+
+        const uRow = dbRes.recordset[0];
+        let actualOk = false;
+        if (uRow.PasswordHash && uRow.PasswordHash.startsWith('$2')) {
+            actualOk = await bcrypt.compare(pActual, uRow.PasswordHash);
+        }
+        if (!actualOk && uRow.Clave && uRow.Clave === pActual) {
+            actualOk = true;
+        }
+
+        if (!actualOk) {
+            await registrarAuditoriaAcceso(pool, {
+                usuario: req.user.username,
+                evento: 'PASSWORD_CHANGE_FAIL',
+                detalle: 'Intento de cambio de contraseña con clave actual incorrecta',
+                req,
+                exitoso: false
+            });
+            return res.status(401).json({ status: 'error', message: 'La contraseña actual ingresada no es correcta.' });
+        }
+
+        const nuevoHash = await bcrypt.hash(pNueva, BCRYPT_ROUNDS);
+        const claveLegada = pNueva.slice(0, 10);
+
+        await pool
+            .request()
+            .input('Clave', sql.NVarChar, claveLegada)
+            .input('PasswordHash', sql.NVarChar, nuevoHash)
+            .input('User', sql.NVarChar, uRow.Usuario)
+            .query(`
+                UPDATE Usuarios
+                SET Clave = @Clave,
+                    PasswordHash = @PasswordHash,
+                    DebeCambiarClave = 0,
+                    UltimoCambioClave = GETDATE()
+                WHERE LOWER(LTRIM(RTRIM(Usuario))) = LOWER(@User)
+            `);
+
+        invalidateUserCache(uRow.Usuario);
+        await registrarAuditoriaAcceso(pool, {
+            usuario: uRow.Usuario,
+            evento: 'PASSWORD_CHANGE',
+            detalle: 'El usuario actualizó su contraseña personal',
+            req,
+            exitoso: true
+        });
+
+        res.json({
+            status: 'ok',
+            message: 'Su contraseña ha sido actualizada exitosamente.'
+        });
+    } catch (err) {
+        console.error('Error en POST /api/auth/change-password:', err);
+        res.status(500).json({ status: 'error', message: 'Error al cambiar la contraseña.' });
+    }
+});
+
+// Rutas de Administración de Usuarios y Seguridad (Solo Administradores 'A')
+app.use('/api/usuarios', async (req, res, next) => {
+    try {
+        req.db = await getConnection();
+        next();
+    } catch (e) {
+        res.status(500).json({ error: 'DB connection error' });
+    }
+}, require('./routes/usuarios'));
+
+// Inject pool for reposo routes (Permitido para 'A', 'G', 'M')
+app.use('/api/reposo', requireRoles('A', 'G', 'M'), async (req, res, next) => {
     try {
         req.db = await getConnection();
         next();
@@ -53,8 +372,8 @@ app.use('/api/reposo', async (req, res, next) => {
     }
 }, require('./routes/reposo'));
 
-// Inject pool for mantencion routes
-app.use('/api/mantencion', async (req, res, next) => {
+// Inject pool for mantencion routes (Solo Administradores 'A' y Prevención 'M')
+app.use('/api/mantencion', requireRoles('A', 'M'), async (req, res, next) => {
     try {
         req.db = await getConnection();
         next();
@@ -63,8 +382,8 @@ app.use('/api/mantencion', async (req, res, next) => {
     }
 }, require('./routes/mantencion'));
 
-// Inject pool for pagos-masivos routes
-app.use('/api/pagos-masivos', async (req, res, next) => {
+// Inject pool for pagos-masivos routes (Solo Administradores 'A')
+app.use('/api/pagos-masivos', requireRoles('A'), async (req, res, next) => {
     try {
         req.db = await getConnection();
         next();
@@ -83,8 +402,8 @@ app.use('/api/informes', async (req, res, next) => {
     }
 }, require('./routes/informes'));
 
-// Inject pool for remuneraciones routes (Carga Mensual de Personal, Renta Imponible y Previsión)
-app.use('/api/remuneraciones', async (req, res, next) => {
+// Inject pool for remuneraciones routes (Solo Administradores 'A')
+app.use('/api/remuneraciones', requireRoles('A'), async (req, res, next) => {
     try {
         req.db = await getConnection();
         next();
@@ -92,45 +411,6 @@ app.use('/api/remuneraciones', async (req, res, next) => {
         res.status(500).json({ error: 'DB connection error' });
     }
 }, require('./routes/remuneraciones'));
-
-const jwt = require('jsonwebtoken');
-
-// Login endpoint
-app.post('/api/auth/login', async (req, res) => {
-    const { username, password } = req.body;
-    
-    if (!username || !password) {
-        return res.status(400).json({ status: 'error', message: 'Usuario y contraseña son requeridos' });
-    }
-
-    try {
-        const pool = await getConnection();
-        // The table columns are nchar, so we use rtrim to remove trailing spaces if any
-        const result = await pool.request()
-            .input('user', sql.NVarChar, username)
-            .input('pass', sql.NVarChar, password)
-            .query(`
-                SELECT RTRIM(Usuario) as Usuario, RTRIM(Tipo) as Tipo, RTRIM(Unidad) as Unidad 
-                FROM Usuarios 
-                WHERE RTRIM(Usuario) = @user AND RTRIM(Clave) = @pass
-            `);
-
-        if (result.recordset.length > 0) {
-            const user = result.recordset[0];
-            const token = jwt.sign(
-                { username: user.Usuario, tipo: user.Tipo, unidad: user.Unidad }, 
-                process.env.JWT_SECRET || 'secret', 
-                { expiresIn: '8h' }
-            );
-            res.json({ status: 'ok', token, user });
-        } else {
-            res.status(401).json({ status: 'error', message: 'Credenciales inválidas' });
-        }
-    } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ status: 'error', message: 'Error interno del servidor' });
-    }
-});
 
 // Dashboard stats endpoint
 

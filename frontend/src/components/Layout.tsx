@@ -16,7 +16,16 @@ export default function Layout() {
   const [menuPagoDirectoOpen, setMenuPagoDirectoOpen] = useState(false);
   const [menuInfoGestionOpen, setMenuInfoGestionOpen] = useState(false);
   const [menuMantenedorOpen, setMenuMantenedorOpen] = useState(false);
-  const [userData, setUserData] = useState({ username: '', unidad: '', tipo: 'A' });
+  const [userData, setUserData] = useState({ username: '', unidad: '', tipo: 'A', debeCambiarClave: false });
+
+  // Modal de Cambio de Contraseña Personal (voluntario u obligatorio si DebeCambiarClave = true)
+  const [mostrarCambioClave, setMostrarCambioClave] = useState(false);
+  const [esCambioObligatorio, setEsCambioObligatorio] = useState(false);
+  const [claveActual, setClaveActual] = useState('');
+  const [claveNueva, setClaveNueva] = useState('');
+  const [claveConfirmar, setClaveConfirmar] = useState('');
+  const [msgCambioClave, setMsgCambioClave] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
+  const [guardandoClave, setGuardandoClave] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -24,11 +33,35 @@ export default function Layout() {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
         const tipoUser = (payload.tipo || 'A').trim().toUpperCase();
+        const debeCambiar = Boolean(payload.debeCambiarClave);
         setUserData({
           username: payload.username || '',
           unidad: payload.unidad || '',
-          tipo: tipoUser
+          tipo: tipoUser,
+          debeCambiarClave: debeCambiar
         });
+        if (debeCambiar) {
+          setEsCambioObligatorio(true);
+          setMostrarCambioClave(true);
+        }
+        // Verificar estado actualizado en el servidor (/api/auth/me)
+        fetch('/api/auth/me')
+          .then(r => (r.ok ? r.json() : null))
+          .then(d => {
+            if (d?.status === 'ok' && d.user) {
+              setUserData(prev => ({
+                ...prev,
+                tipo: (d.user.tipo || prev.tipo).trim().toUpperCase(),
+                unidad: d.user.unidad || prev.unidad,
+                debeCambiarClave: Boolean(d.user.debeCambiarClave)
+              }));
+              if (d.user.debeCambiarClave) {
+                setEsCambioObligatorio(true);
+                setMostrarCambioClave(true);
+              }
+            }
+          })
+          .catch(() => {});
       } catch (e) {
         console.error('Error decoding token');
         navigate('/login');
@@ -37,6 +70,49 @@ export default function Layout() {
       navigate('/login');
     }
   }, [navigate]);
+
+  const handleGuardarCambioClave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMsgCambioClave(null);
+    if (claveNueva.length < 6) {
+      setMsgCambioClave({ tipo: 'err', texto: 'La nueva contraseña debe tener al menos 6 caracteres.' });
+      return;
+    }
+    if (claveNueva !== claveConfirmar) {
+      setMsgCambioClave({ tipo: 'err', texto: 'La confirmación de la nueva contraseña no coincide.' });
+      return;
+    }
+    setGuardandoClave(true);
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          passwordActual: claveActual,
+          passwordNueva: claveNueva
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || data.status !== 'ok') {
+        setMsgCambioClave({ tipo: 'err', texto: data.message || 'No se pudo actualizar la contraseña.' });
+      } else {
+        setMsgCambioClave({ tipo: 'ok', texto: data.message || 'Contraseña actualizada correctamente.' });
+        setEsCambioObligatorio(false);
+        setUserData(prev => ({ ...prev, debeCambiarClave: false }));
+        setClaveActual('');
+        setClaveNueva('');
+        setClaveConfirmar('');
+        setTimeout(() => {
+          setMostrarCambioClave(false);
+          setMsgCambioClave(null);
+        }, 1200);
+      }
+    } catch {
+      setMsgCambioClave({ tipo: 'err', texto: 'Error de conexión con el servidor.' });
+    } finally {
+      setGuardandoClave(false);
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -759,6 +835,16 @@ export default function Layout() {
                     >
                       Carga Mensual Remuneraciones
                     </Link>
+                    <Link
+                      to="/mantencion/usuarios"
+                      className={`block py-2 px-3 rounded-md transition-colors ${
+                        isActive('/mantencion/usuarios')
+                          ? 'bg-[#39BABD] text-white font-bold'
+                          : 'text-blue-100 hover:bg-white/10'
+                      }`}
+                    >
+                      Usuarios y Seguridad
+                    </Link>
                   </div>
                 )}
               </div>
@@ -766,8 +852,22 @@ export default function Layout() {
           </nav>
         </div>
 
-        {/* Botón Cerrar Sesión */}
-        <div className="p-4 border-t border-white/15">
+        {/* Botones Cambiar Contraseña y Cerrar Sesión */}
+        <div className="p-4 border-t border-white/15 space-y-2">
+          <button
+            type="button"
+            onClick={() => {
+              setMsgCambioClave(null);
+              setClaveActual('');
+              setClaveNueva('');
+              setClaveConfirmar('');
+              setMostrarCambioClave(true);
+            }}
+            className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-white/10 hover:bg-white/20 text-blue-100 text-xs font-semibold border border-white/15 transition-colors cursor-pointer"
+          >
+            <span>🔑</span>
+            <span>Cambiar Mi Contraseña</span>
+          </button>
           <button
             onClick={handleLogout}
             className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-[#EB567F] hover:bg-[#d6416a] text-white text-xs font-bold shadow transition-colors cursor-pointer"
@@ -791,6 +891,113 @@ export default function Layout() {
           <Outlet />
         </div>
       </div>
+
+      {/* Modal de Cambio de Contraseña Personal (Voluntario u Obligatorio) */}
+      {mostrarCambioClave && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4"
+          onClick={() => {
+            if (!esCambioObligatorio) setMostrarCambioClave(false);
+          }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="bg-[#016098] text-white px-6 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-extrabold">
+                  {esCambioObligatorio ? '⚠️ Actualización Obligatoria de Contraseña' : '🔑 Cambiar Mi Contraseña'}
+                </h3>
+                <p className="text-[11px] text-blue-100 mt-0.5">Usuario en sesión: {userData.username}</p>
+              </div>
+              {!esCambioObligatorio && (
+                <button
+                  type="button"
+                  onClick={() => setMostrarCambioClave(false)}
+                  className="text-white/80 hover:text-white font-bold"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <form onSubmit={handleGuardarCambioClave} className="p-6 space-y-4 text-xs">
+              {esCambioObligatorio && (
+                <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded-lg text-amber-900 font-medium">
+                  El Administrador ha solicitado que defina una nueva contraseña personal antes de continuar operando en el sistema.
+                </div>
+              )}
+
+              {msgCambioClave && (
+                <div
+                  className={`p-3 rounded-lg font-bold ${
+                    msgCambioClave.tipo === 'ok'
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      : 'bg-rose-50 text-rose-800 border border-rose-200'
+                  }`}
+                >
+                  {msgCambioClave.texto}
+                </div>
+              )}
+
+              <div>
+                <label className="block font-bold text-[#334155] mb-1">Contraseña Actual *</label>
+                <input
+                  type="password"
+                  required
+                  value={claveActual}
+                  onChange={e => setClaveActual(e.target.value)}
+                  className="w-full px-3 py-2 border border-[#cbd5e1] rounded-lg bg-[#f8fafc]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-[#334155] mb-1">Nueva Contraseña (mín. 6 caracteres) *</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={claveNueva}
+                  onChange={e => setClaveNueva(e.target.value)}
+                  className="w-full px-3 py-2 border border-[#cbd5e1] rounded-lg bg-[#f8fafc]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-[#334155] mb-1">Confirmar Nueva Contraseña *</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={claveConfirmar}
+                  onChange={e => setClaveConfirmar(e.target.value)}
+                  className="w-full px-3 py-2 border border-[#cbd5e1] rounded-lg bg-[#f8fafc]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                {!esCambioObligatorio && (
+                  <button
+                    type="button"
+                    onClick={() => setMostrarCambioClave(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl"
+                  >
+                    Cancelar
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={guardandoClave}
+                  className="px-5 py-2 bg-[#016098] hover:bg-[#014b78] text-white font-bold rounded-xl shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  {guardandoClave ? 'Actualizando...' : 'Actualizar Contraseña'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
