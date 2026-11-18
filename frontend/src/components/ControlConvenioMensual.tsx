@@ -30,6 +30,7 @@ interface MesConvenioRow {
   AutorizadasPorPagoSaludCant?: number;
   FalsosRechazosPagadosCant: number;
   FalsosRechazosDobleCobroCant: number;
+  NoRechConDescuentoCant?: number;
   FalsosRechazosCompinCant: number;
   RechazadasRecuperadasDescCant: number;
   RechazadasRecuperablesCant: number;
@@ -46,6 +47,7 @@ interface MesConvenioRow {
   PagadoSubsidio: number;
   PagadoAporte: number;
   PagadoSaludTotal: number;
+  PagadoDescuentoNoRech?: number;
   PagadoDescuentoFunc: number;
   FaltaPorCobrar: number;
   ExcedenteSobreEstimado: number;
@@ -96,6 +98,7 @@ type FiltroDetalleTipo =
   | 'por-cobrar'
   | 'sin-pago'
   | 'pagadas'
+  | 'no-rech-descuento'
   | 'rechazadas'
   | 'falso-rechazo-salud'
   | 'falso-rechazo-doble'
@@ -113,11 +116,12 @@ const ETIQUETAS_FILTRO: Record<FiltroDetalleTipo, string> = {
   'menor-saldada': '3A. Menor Pago pero Ya Saldadas por Regla (No llegará otro pago -> Queda en $0 por cobrar)',
   'menor-parcial': '3B. Menor Pago con Pago Parcial Abierto (Sí llegará otro delta -> Va a Falta por Cobrar)',
   'por-cobrar': 'Falta por Cobrar Real a Instituciones de Salud (Pago Parcial Abierto + Sin Pago en $0)',
-  'sin-pago': '3C. Licencias No Rechazadas en $0 (Sin Pago de Inst. de Salud aún -> Pendiente 100%)',
-  'pagadas': 'Licencias Válidas Saldadas por Inst. de Salud (FONASA ≤3d Aporte, >3d Aporte+Subsidio, ISAPRE Pago)',
+  'sin-pago': '3C. Licencias No Rechazadas en $0 (Sin Pago de Inst. de Salud ni Descuento aún -> Pendiente 100%)',
+  'pagadas': 'Licencias Válidas Saldadas (FONASA ≤3d Aporte, >3d Aporte+Subsidio, ISAPRE Pago o Descuento al Trabajador)',
+  'no-rech-descuento': '💼 Licencias Válidas (No Rechazadas) Cubiertas por Descuento al Trabajador (Sin Derecho a Subsidio / Reducidas)',
   'rechazadas': 'Todas las Licencias Marcadas como Rechazadas',
   'falso-rechazo-salud': '⚡ Licencias Autorizadas Automáticamente por Recibo de Pago Inst. Salud (AUT_PAGO_SALUD)',
-  'falso-rechazo-doble': '🚨 Doble Cobro: Pagadas por Inst. de Salud y además con Descuento al Funcionario',
+  'falso-rechazo-doble': '🚨 Doble Cobro: Pagadas por Inst. de Salud y además con Descuento al Funcionario (Pendiente Devolución)',
   'falso-rechazo-compin': '✅ Observación COMPIN dice "Autorizada / Ampliada"',
   'rech-recuperables': 'Rechazadas Recuperables (Funcionario Vigente — Descuento por Remuneraciones)',
   'rech-incobrables': 'Rechazadas Incobrables (Funcionario No Vigente / Finiquitado)',
@@ -723,6 +727,7 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
       if (filtroEstadoDet === 'por-cobrar' && !(r.EscenarioCobro === 'POR_COBRAR_SALUD' && !r.Rechazo)) return false;
       if (filtroEstadoDet === 'sin-pago' && !(Number(r.MontoPagado || 0) === 0 && !r.Rechazo && !r.EsSaldadaSalud)) return false;
       if (filtroEstadoDet === 'pagadas' && !(r.EsSaldadaSalud && !r.Rechazo)) return false;
+      if (filtroEstadoDet === 'no-rech-descuento' && !r.EsSaldadaPorDescuentoNoRech) return false;
       if (filtroEstadoDet === 'rechazadas' && !r.Rechazo) return false;
       if (filtroEstadoDet === 'falso-rechazo-salud' && !r.EsFalsoRechazoPagado) return false;
       if (filtroEstadoDet === 'falso-rechazo-doble' && !r.EsDobleCobro) return false;
@@ -1135,9 +1140,29 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                         <b className="underline">{formatCLP(kpiActivo.EstimadoNoRechazado)} (100%)</b>
                       </span>
                     </div>
-                    <span className="text-[11px] font-semibold text-teal-800 bg-teal-50 px-2.5 py-0.5 rounded border border-teal-200">
-                      ℹ️ Delta a Favor (+{formatCLP(kpiActivo.MayorDeltaMas)} · +{pctDeltaMas}% en {Number(kpiActivo.MayorCant || 0).toLocaleString('es-CL')} lic.) es informativo y no se suma al estimado
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {Number(kpiActivo.NoRechConDescuentoCant || 0) > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => abrirModalDetalle(mesSeleccionado, 'no-rech-descuento')}
+                          className="text-[11px] font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-0.5 rounded border border-indigo-200 cursor-pointer transition-colors"
+                        >
+                          💼 Incl. {Number(kpiActivo.NoRechConDescuentoCant || 0).toLocaleString('es-CL')} lic. válidas cubiertas vía Descuento Func. ({formatCLP(kpiActivo.PagadoDescuentoNoRech || 0)}) →
+                        </button>
+                      )}
+                      {Number(kpiActivo.FalsosRechazosDobleCobroCant || 0) > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => abrirModalDetalle(mesSeleccionado, 'falso-rechazo-doble')}
+                          className="text-[11px] font-bold text-rose-900 bg-rose-50 hover:bg-rose-100 px-2.5 py-0.5 rounded border border-rose-200 cursor-pointer transition-colors"
+                        >
+                          🚨 {Number(kpiActivo.FalsosRechazosDobleCobroCant || 0).toLocaleString('es-CL')} Doble Cobro (Salud + Desc. Func.) →
+                        </button>
+                      )}
+                      <span className="text-[11px] font-semibold text-teal-800 bg-teal-50 px-2.5 py-0.5 rounded border border-teal-200">
+                        ℹ️ Delta a Favor (+{formatCLP(kpiActivo.MayorDeltaMas)} · +{pctDeltaMas}% en {Number(kpiActivo.MayorCant || 0).toLocaleString('es-CL')} lic.) es informativo y no se suma al estimado
+                      </span>
+                    </div>
                   </div>
                 </>
               );
@@ -1782,8 +1807,16 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                     label: `🟩 Rech. Recuperadas Desc. (${registrosDetalle.filter(r => r.EscenarioCobro === 'RECHAZADA_RECUPERADA').length})`
                   },
                   {
+                    id: 'no-rech-descuento',
+                    label: `💼 Válidas con Desc. Trabajador (${registrosDetalle.filter(r => r.EsSaldadaPorDescuentoNoRech).length})`
+                  },
+                  {
                     id: 'falso-rechazo-salud',
                     label: `⚡ Autorizadas por Pago Salud (${registrosDetalle.filter(r => r.EsFalsoRechazoPagado).length})`
+                  },
+                  {
+                    id: 'falso-rechazo-doble',
+                    label: `🚨 Doble Cobro (${registrosDetalle.filter(r => r.EsDobleCobro).length})`
                   }
                 ].map(f => (
                   <button
@@ -1911,7 +1944,15 @@ export default function ControlConvenioMensual({ initialYear }: ControlConvenioM
                             </span>
                           </td>
                           <td className="p-2.5 whitespace-nowrap">
-                            {r.EsFalsoRechazoPagado ? (
+                            {r.EsDobleCobro ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900 border border-rose-300">
+                                {r.SituacionCobroLabel || '🚨 Doble Cobro (Salud + Desc.)'}
+                              </span>
+                            ) : r.EsSaldadaPorDescuentoNoRech ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900 border border-indigo-300">
+                                💼 {r.SituacionCobroLabel || 'Saldada (Descuento al Trabajador)'}
+                              </span>
+                            ) : r.EsFalsoRechazoPagado ? (
                               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
                                 ⚡ {r.SituacionCobroLabel || 'Autorizada por Pago Salud'}
                               </span>
