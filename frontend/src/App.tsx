@@ -20,6 +20,7 @@ import MantencionUsuarios from './pages/MantencionUsuarios';
 import PagosMasivos from './pages/PagosMasivos';
 import CertificadosNominas from './pages/CertificadosNominas';
 import InformesLegacy from './pages/InformesLegacy';
+import DocumentosPagoMes from './pages/DocumentosPagoMes';
 
 function App() {
   return (
@@ -54,6 +55,7 @@ function App() {
           <Route path="informes/brp" element={<InformesLegacy tabInicial="brp" />} />
           <Route path="informes/pago-directo" element={<InformesLegacy tabInicial="pago-directo" />} />
           <Route path="informes/general-pagos" element={<InformesLegacy tabInicial="general-pagos" />} />
+          <Route path="informes/documentos-pago-mes" element={<DocumentosPagoMes />} />
           <Route path="informes/softland" element={<InformesLegacy tabInicial="softland" />} />
 
           <Route path="licencias/auditoria-cuadratura" element={<AuditoriaCuadratura />} />

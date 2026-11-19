@@ -749,4 +749,485 @@ router.get('/captura-softland', async (req, res) => {
     }
 });
 
+// 9. Documentos de Pago Recibidos en un Mes con Máximo Detalle (Maestro de Documentos + Sábana Detallada de Movimientos)
+router.get('/documentos-pago-mes', async (req, res) => {
+    try {
+        const pool = req.db;
+        const now = new Date();
+        const anio = parseInt(req.query.anio || now.getFullYear(), 10);
+        const mes = req.query.mes !== undefined ? parseInt(req.query.mes, 10) : (now.getMonth() + 1);
+        const criterio = String(req.query.criterio || 'deposito').toLowerCase(); // 'deposito' | 'recepcion'
+
+        let fechaInicio;
+        let fechaFin;
+        if (mes >= 1 && mes <= 12) {
+            fechaInicio = `${anio}-${String(mes).padStart(2, '0')}-01`;
+            const nextAnio = mes === 12 ? anio + 1 : anio;
+            const nextMes = mes === 12 ? 1 : mes + 1;
+            fechaFin = `${nextAnio}-${String(nextMes).padStart(2, '0')}-01`;
+        } else {
+            fechaInicio = `${anio}-01-01`;
+            fechaFin = `${anio + 1}-01-01`;
+        }
+
+        const buildDateWhere = (alias) => {
+            if (criterio === 'recepcion') {
+                return `((${alias}.recepcion >= @FechaInicio AND ${alias}.recepcion < @FechaFin) OR (${alias}.recepcion IS NULL AND ${alias}.FechaDepCtaCte >= @FechaInicio AND ${alias}.FechaDepCtaCte < @FechaFin))`;
+            }
+            return `((${alias}.FechaDepCtaCte >= @FechaInicio AND ${alias}.FechaDepCtaCte < @FechaFin) OR (${alias}.FechaDepCtaCte IS NULL AND ${alias}.recepcion >= @FechaInicio AND ${alias}.recepcion < @FechaFin))`;
+        };
+
+        const whereD = buildDateWhere('D');
+
+        // 1. Obtener todos los movimientos individuales de pago del período con máximo detalle
+        const movRes = await pool.request()
+            .input('FechaInicio', sql.Date, fechaInicio)
+            .input('FechaFin', sql.Date, fechaFin)
+            .query(`
+                SELECT
+                    D.Correlativo,
+                    RTRIM(ISNULL(D.NumeroLicencia, '')) as NumeroLicencia,
+                    RTRIM(ISNULL(D.NumeroDocumento, '')) as NumeroDocumento,
+                    RTRIM(ISNULL(D.Banco, '')) as Banco,
+                    RTRIM(ISNULL(D.concepto, '')) as Concepto,
+                    CONVERT(varchar, D.FechaDepCtaCte, 23) as FechaDeposito,
+                    CONVERT(varchar, D.recepcion, 23) as FechaRecepcion,
+                    ISNULL(D.DiasPagados, 0) as DiasPagados,
+                    CONVERT(varchar, D.Desde, 23) as PagoDesde,
+                    CONVERT(varchar, D.Hasta, 23) as PagoHasta,
+                    ISNULL(D.Monto, 0) as Monto,
+                    RTRIM(ISNULL(D.Observacion, '')) as ObservacionPago,
+                    RTRIM(ISNULL(D.cenco, '')) as CencoPago,
+                    RTRIM(ISNULL(L.RutFuncionario, '')) as Rut,
+                    RTRIM(ISNULL(F.DV, ISNULL(L.dv, ''))) as DV,
+                    RTRIM(ISNULL(F.Nombre, '')) as Nombre,
+                    RTRIM(ISNULL(F.Paterno, '')) as Paterno,
+                    RTRIM(ISNULL(F.Materno, '')) as Materno,
+                    ISNULL(F.CodUnidad, 0) as CodUnidad,
+                    RTRIM(ISNULL(E.Descripcion, '')) as Establecimiento,
+                    RTRIM(ISNULL(E.CCosto, '')) as CCosto,
+                    ISNULL(E.CodSector, 0) as CodSector,
+                    RTRIM(ISNULL(F.descripcionPlanta, '')) as Planta,
+                    RTRIM(ISNULL(S.Descripcion, '')) as Salud,
+                    CONVERT(varchar, L.Desde, 23) as LicDesde,
+                    CONVERT(varchar, L.Hasta, 23) as LicHasta,
+                    ISNULL(L.NumDias, 0) as NumDiasLicencia,
+                    ISNULL(L.DiasAutorizados, 0) as DiasAutorizados,
+                    ISNULL(L.Maternal, 0) as Maternal,
+                    ISNULL(L.Rechazo, 0) as Rechazo,
+                    ISNULL(L.Parcial, 0) as Parcial,
+                    ISNULL(L.regularizado, 0) as Regularizado,
+                    ISNULL(L.PagoEstimado, 0) as PagoEstimado,
+                    ISNULL(L.SubsidioDiario, 0) as SubsidioDiario,
+                    ISNULL(L.MontoNetoPromedio, 0) as MontoNetoPromedio,
+                    RTRIM(ISNULL(L.PagoDirecto, '')) as PagoDirecto,
+                    RTRIM(ISNULL(L.Tipo_enferm, '')) as TipoEnferm,
+                    RTRIM(ISNULL(L.Observacion, '')) as ObservacionLicencia,
+                    ISNULL(PA.TotalPagado, 0) as TotalAcumuladoLicencia,
+                    ISNULL(PA.NumDiasPagados, 0) as DiasAcumuladosLicencia
+                FROM LIC_DETALLE_PAGO_ACTUAL D
+                LEFT JOIN LIC_LICENCIA_ACTUAL L ON D.NumeroLicencia = L.NumeroLicencia
+                LEFT JOIN LIC_FUNCIONARIO F ON L.RutFuncionario = F.Rut
+                LEFT JOIN LIC_ESTABLECIMIENTO E ON F.CodUnidad = E.CodUnidad
+                LEFT JOIN LIC_SALUD S ON TRY_CAST(F.UltimaPrev AS INT) = S.CodSalud
+                LEFT JOIN LIC_PAGO_ACTUAL PA ON D.NumeroLicencia = PA.NumeroLicencia
+                WHERE ${whereD}
+                ORDER BY D.FechaDepCtaCte DESC, D.recepcion DESC, D.Banco ASC, D.NumeroDocumento ASC, D.Correlativo ASC
+            `);
+
+        // Extraer números de documento únicos activos en el período
+        const docNumsSet = new Set();
+        for (const r of (movRes.recordset || [])) {
+            const nd = String(r.NumeroDocumento || '').trim();
+            if (nd) docNumsSet.add(nd);
+        }
+        const activeDocNums = Array.from(docNumsSet).slice(0, 500);
+
+        // 2. Obtener cabeceras de DETALLE_CHEQUES asociadas al período o a los documentos con movimientos en el período
+        const chequesReq = pool.request()
+            .input('FechaInicio', sql.Date, fechaInicio)
+            .input('FechaFin', sql.Date, fechaFin);
+
+        let chequesInClause = '';
+        if (activeDocNums.length > 0) {
+            const params = activeDocNums.map((num, idx) => {
+                const pName = `DocNum${idx}`;
+                chequesReq.input(pName, sql.NVarChar, num);
+                return `@${pName}`;
+            });
+            chequesInClause = ` OR RTRIM(ISNULL(C.num, '')) IN (${params.join(', ')})`;
+        }
+
+        const chequesRes = await chequesReq.query(`
+            SELECT
+                RTRIM(ISNULL(C.banco, '')) as Banco,
+                RTRIM(ISNULL(C.num, '')) as NumeroDocumento,
+                ISNULL(C.monto, 0) as MontoCheque,
+                ISNULL(C.saldo, 0) as SaldoTabla,
+                CONVERT(varchar, C.Fecha, 23) as FechaCheque,
+                RTRIM(ISNULL(C.Tipo, '')) as Tipo,
+                RTRIM(ISNULL(C.area, '')) as Area,
+                RTRIM(ISNULL(C.estado, '')) as Estado
+            FROM DETALLE_CHEQUES C
+            WHERE (C.Fecha >= @FechaInicio AND C.Fecha < @FechaFin)${chequesInClause}
+        `);
+
+        for (const ch of (chequesRes.recordset || [])) {
+            const nd = String(ch.NumeroDocumento || '').trim();
+            if (nd) docNumsSet.add(nd);
+        }
+        const allDocNums = Array.from(docNumsSet).slice(0, 500);
+
+        // 3. Obtener totales globales históricos por documento para cuadrar documentos que abarcan más de una fecha
+        let globalTotalsRes = { recordset: [] };
+        if (allDocNums.length > 0) {
+            const globalReq = pool.request();
+            const gParams = allDocNums.map((num, idx) => {
+                const pName = `GDoc${idx}`;
+                globalReq.input(pName, sql.NVarChar, num);
+                return `@${pName}`;
+            });
+            globalTotalsRes = await globalReq.query(`
+                SELECT
+                    RTRIM(ISNULL(D.Banco, '')) as Banco,
+                    RTRIM(ISNULL(D.NumeroDocumento, '')) as NumeroDocumento,
+                    COUNT(*) as TotalMovimientosGlobal,
+                    SUM(CASE WHEN RTRIM(ISNULL(D.concepto, '')) <> 'Devolucion' THEN ISNULL(D.Monto, 0) ELSE 0 END) as MontoImputadoGlobal,
+                    SUM(ISNULL(D.Monto, 0)) as MontoTotalGlobal,
+                    CONVERT(varchar, MIN(D.FechaDepCtaCte), 23) as PrimeraFechaDeposito,
+                    CONVERT(varchar, MAX(D.FechaDepCtaCte), 23) as UltimaFechaDeposito
+                FROM LIC_DETALLE_PAGO_ACTUAL D
+                WHERE D.NumeroDocumento IN (${gParams.join(', ')})
+                GROUP BY RTRIM(ISNULL(D.Banco, '')), RTRIM(ISNULL(D.NumeroDocumento, ''))
+            `);
+        }
+
+        // Indexar cabeceras de cheques y totales globales
+        const normalizeKey = (banco, numDoc) => `${String(banco || '').trim().toUpperCase()}||${String(numDoc || '').trim().toUpperCase()}`;
+        const chequesByExactKey = new Map();
+        const chequesByNumDoc = new Map();
+
+        for (const ch of (chequesRes.recordset || [])) {
+            const key = normalizeKey(ch.Banco, ch.NumeroDocumento);
+            chequesByExactKey.set(key, ch);
+            const numKey = String(ch.NumeroDocumento || '').trim().toUpperCase();
+            if (numKey && !chequesByNumDoc.has(numKey)) {
+                chequesByNumDoc.set(numKey, ch);
+            }
+        }
+
+        const globalByExactKey = new Map();
+        const globalByNumDoc = new Map();
+        for (const g of (globalTotalsRes.recordset || [])) {
+            const key = normalizeKey(g.Banco, g.NumeroDocumento);
+            globalByExactKey.set(key, g);
+            const numKey = String(g.NumeroDocumento || '').trim().toUpperCase();
+            if (numKey && !globalByNumDoc.has(numKey)) {
+                globalByNumDoc.set(numKey, g);
+            }
+        }
+
+        // Procesar movimientos y agrupar por documento (Banco + NumeroDocumento)
+        const docGroups = new Map();
+        const licenciasSetMes = new Set();
+        const funcionariosSetMes = new Set();
+
+        const resumen = {
+            anio,
+            mes,
+            criterio,
+            fechaInicio,
+            fechaFin,
+            totalDocumentos: 0,
+            documentosEnTablaCheques: 0,
+            documentosCerrados: 0,
+            documentosAbiertos: 0,
+            documentosCuadrados: 0,
+            documentosConDiferencia: 0,
+            documentosNominaDescuento: 0,
+            totalMovimientos: 0,
+            totalLicenciasDistintas: 0,
+            totalFuncionariosDistintos: 0,
+            totalDiasPagados: 0,
+            montoTotalMes: 0,
+            montoSubsidio: 0,
+            montoAporte: 0,
+            montoDescuento: 0,
+            montoDevolucion: 0,
+            montoOtros: 0,
+            montoEducacion: 0,
+            montoSaludAPS: 0,
+            montoSinSector: 0,
+            montoChequesRegistrados: 0,
+            montoImputadoCheques: 0,
+            diferenciaGlobalCheques: 0
+        };
+
+        const movimientos = (movRes.recordset || []).map((m) => {
+            const monto = Number(m.Monto || 0);
+            const dias = Number(m.DiasPagados || 0);
+            const concepto = String(m.Concepto || 'Sin Concepto').trim();
+            const banco = String(m.Banco || '').trim() || 'SIN BANCO';
+            const numDoc = String(m.NumeroDocumento || '').trim() || 'SIN DOCUMENTO';
+            const codSector = Number(m.CodSector || 0);
+            const sectorNombre = codSector === 1 ? 'Educación' : codSector === 2 ? 'Salud APS' : 'Otro / Central';
+            const nombreFuncionario = [m.Nombre, m.Paterno, m.Materno].filter(Boolean).join(' ').trim();
+            const rutFormateado = m.Rut ? `${m.Rut}${m.DV ? '-' + m.DV : ''}` : '';
+
+            // Actualizar acumuladores globales del mes
+            resumen.totalMovimientos += 1;
+            resumen.totalDiasPagados += dias;
+            resumen.montoTotalMes += monto;
+
+            if (m.NumeroLicencia) licenciasSetMes.add(m.NumeroLicencia);
+            if (m.Rut) funcionariosSetMes.add(m.Rut);
+
+            const conceptoUpper = concepto.toUpperCase();
+            if (conceptoUpper === 'SUBSIDIO') resumen.montoSubsidio += monto;
+            else if (conceptoUpper === 'APORTE') resumen.montoAporte += monto;
+            else if (conceptoUpper === 'DESCUENTO') resumen.montoDescuento += monto;
+            else if (conceptoUpper === 'DEVOLUCION' || conceptoUpper === 'DEVOLUCIÓN') resumen.montoDevolucion += monto;
+            else resumen.montoOtros += monto;
+
+            if (codSector === 1) resumen.montoEducacion += monto;
+            else if (codSector === 2) resumen.montoSaludAPS += monto;
+            else resumen.montoSinSector += monto;
+
+            // Agrupar en documento
+            const docKey = normalizeKey(banco, numDoc);
+            if (!docGroups.has(docKey)) {
+                const isDescuentoPayroll = banco.toUpperCase() === 'DESCUENTO';
+                const ch = isDescuentoPayroll
+                    ? null
+                    : (chequesByExactKey.get(docKey) || (numDoc.length >= 4 ? chequesByNumDoc.get(numDoc.toUpperCase()) : null) || null);
+                const gl = globalByExactKey.get(docKey) || (!isDescuentoPayroll && numDoc.length >= 4 ? globalByNumDoc.get(numDoc.toUpperCase()) : null) || null;
+                docGroups.set(docKey, {
+                    docKey,
+                    Banco: banco,
+                    NumeroDocumento: numDoc,
+                    EnTablaCheques: Boolean(ch),
+                    TipoDocumento: ch ? (ch.Tipo || 'Transferencia') : (banco.toUpperCase() === 'DESCUENTO' ? 'Nómina Descuento' : 'Sin Cabecera'),
+                    AreaCheque: ch ? (ch.Area || '') : '',
+                    EstadoCheque: ch ? (ch.Estado || 'Abierto') : (banco.toUpperCase() === 'DESCUENTO' ? 'Nómina RRHH' : 'Sin Cabecera'),
+                    FechaCheque: ch ? ch.FechaCheque : null,
+                    MontoChequeOriginal: ch ? Number(ch.MontoCheque || 0) : 0,
+                    SaldoTablaCheque: ch ? Number(ch.SaldoTabla || 0) : 0,
+                    MontoImputadoGlobal: gl ? Number(gl.MontoImputadoGlobal || 0) : 0,
+                    TotalMovimientosGlobal: gl ? Number(gl.TotalMovimientosGlobal || 0) : 0,
+                    PrimeraFechaDeposito: gl ? gl.PrimeraFechaDeposito : m.FechaDeposito,
+                    UltimaFechaDeposito: gl ? gl.UltimaFechaDeposito : m.FechaDeposito,
+                    FechaDepositoMinMes: m.FechaDeposito,
+                    FechaDepositoMaxMes: m.FechaDeposito,
+                    FechaRecepcionMinMes: m.FechaRecepcion,
+                    FechaRecepcionMaxMes: m.FechaRecepcion,
+                    CantMovimientosMes: 0,
+                    licenciasSet: new Set(),
+                    funcionariosSet: new Set(),
+                    establecimientosSet: new Set(),
+                    institucionesMap: new Map(),
+                    observacionesSet: new Set(),
+                    sectoresSet: new Set(),
+                    TotalDiasPagadosMes: 0,
+                    MontoTotalMes: 0,
+                    MontoSubsidioMes: 0,
+                    MontoAporteMes: 0,
+                    MontoDescuentoMes: 0,
+                    MontoDevolucionMes: 0
+                });
+            }
+
+            const g = docGroups.get(docKey);
+            g.CantMovimientosMes += 1;
+            g.TotalDiasPagadosMes += dias;
+            g.MontoTotalMes += monto;
+
+            if (conceptoUpper === 'SUBSIDIO') g.MontoSubsidioMes += monto;
+            else if (conceptoUpper === 'APORTE') g.MontoAporteMes += monto;
+            else if (conceptoUpper === 'DESCUENTO') g.MontoDescuentoMes += monto;
+            else if (conceptoUpper === 'DEVOLUCION' || conceptoUpper === 'DEVOLUCIÓN') g.MontoDevolucionMes += monto;
+
+            if (m.NumeroLicencia) g.licenciasSet.add(m.NumeroLicencia);
+            if (m.Rut) g.funcionariosSet.add(m.Rut);
+            if (m.Establecimiento) g.establecimientosSet.add(m.Establecimiento);
+            if (m.ObservacionPago) g.observacionesSet.add(m.ObservacionPago);
+            g.sectoresSet.add(sectorNombre);
+
+            const instName = m.Salud || 'SIN INSTITUCIÓN';
+            g.institucionesMap.set(instName, (g.institucionesMap.get(instName) || 0) + monto);
+
+            if (m.FechaDeposito) {
+                if (!g.FechaDepositoMinMes || m.FechaDeposito < g.FechaDepositoMinMes) g.FechaDepositoMinMes = m.FechaDeposito;
+                if (!g.FechaDepositoMaxMes || m.FechaDeposito > g.FechaDepositoMaxMes) g.FechaDepositoMaxMes = m.FechaDeposito;
+            }
+            if (m.FechaRecepcion) {
+                if (!g.FechaRecepcionMinMes || m.FechaRecepcion < g.FechaRecepcionMinMes) g.FechaRecepcionMinMes = m.FechaRecepcion;
+                if (!g.FechaRecepcionMaxMes || m.FechaRecepcion > g.FechaRecepcionMaxMes) g.FechaRecepcionMaxMes = m.FechaRecepcion;
+            }
+
+            return {
+                ...m,
+                DocKey: docKey,
+                Banco: banco,
+                NumeroDocumento: numDoc,
+                Concepto: concepto,
+                Monto: monto,
+                DiasPagados: dias,
+                NombreCompleto: nombreFuncionario,
+                RutFormateado: rutFormateado,
+                SectorNombre: sectorNombre
+            };
+        });
+
+        // Incluir también cheques de DETALLE_CHEQUES cuya Fecha cae en el período pero aún no tienen movimientos en el mes
+        for (const ch of (chequesRes.recordset || [])) {
+            const docKey = normalizeKey(ch.Banco, ch.NumeroDocumento);
+            const numUpper = String(ch.NumeroDocumento || '').trim().toUpperCase();
+            const alreadyIncluded = docGroups.has(docKey) || Array.from(docGroups.values()).some(d => d.NumeroDocumento.toUpperCase() === numUpper);
+            if (!alreadyIncluded && ch.FechaCheque && ch.FechaCheque >= fechaInicio && ch.FechaCheque < fechaFin) {
+                const gl = globalByExactKey.get(docKey) || globalByNumDoc.get(numUpper) || null;
+                docGroups.set(docKey, {
+                    docKey,
+                    Banco: ch.Banco || 'SIN BANCO',
+                    NumeroDocumento: ch.NumeroDocumento || 'SIN DOCUMENTO',
+                    EnTablaCheques: true,
+                    TipoDocumento: ch.Tipo || 'Transferencia',
+                    AreaCheque: ch.Area || '',
+                    EstadoCheque: ch.Estado || 'Abierto',
+                    FechaCheque: ch.FechaCheque,
+                    MontoChequeOriginal: Number(ch.MontoCheque || 0),
+                    SaldoTablaCheque: Number(ch.SaldoTabla || 0),
+                    MontoImputadoGlobal: gl ? Number(gl.MontoImputadoGlobal || 0) : 0,
+                    TotalMovimientosGlobal: gl ? Number(gl.TotalMovimientosGlobal || 0) : 0,
+                    PrimeraFechaDeposito: gl ? gl.PrimeraFechaDeposito : ch.FechaCheque,
+                    UltimaFechaDeposito: gl ? gl.UltimaFechaDeposito : ch.FechaCheque,
+                    FechaDepositoMinMes: ch.FechaCheque,
+                    FechaDepositoMaxMes: ch.FechaCheque,
+                    FechaRecepcionMinMes: null,
+                    FechaRecepcionMaxMes: null,
+                    CantMovimientosMes: 0,
+                    licenciasSet: new Set(),
+                    funcionariosSet: new Set(),
+                    establecimientosSet: new Set(),
+                    institucionesMap: new Map(),
+                    observacionesSet: new Set(),
+                    sectoresSet: new Set(ch.Area ? [ch.Area] : []),
+                    TotalDiasPagadosMes: 0,
+                    MontoTotalMes: 0,
+                    MontoSubsidioMes: 0,
+                    MontoAporteMes: 0,
+                    MontoDescuentoMes: 0,
+                    MontoDevolucionMes: 0
+                });
+            }
+        }
+
+        // Construir arreglo final de documentos consolidados
+        const documentos = Array.from(docGroups.values()).map((g) => {
+            const institucionesOrdenadas = Array.from(g.institucionesMap.entries())
+                .sort((a, b) => b[1] - a[1])
+                .map(([nombre, total]) => ({ nombre, total }));
+
+            const institucionesResumen = institucionesOrdenadas
+                .slice(0, 3)
+                .map(i => i.nombre)
+                .join(', ') + (institucionesOrdenadas.length > 3 ? ` (+${institucionesOrdenadas.length - 3})` : '');
+
+            const diferenciaRealCheque = g.EnTablaCheques
+                ? (g.MontoChequeOriginal - g.MontoImputadoGlobal)
+                : 0;
+
+            let estadoCuadratura = 'Nómina / Directo';
+            if (g.EnTablaCheques) {
+                if (Math.abs(diferenciaRealCheque) <= 5) {
+                    estadoCuadratura = 'Cuadrado 100%';
+                } else if (g.MontoImputadoGlobal === 0) {
+                    estadoCuadratura = 'Sin Imputar';
+                } else if (diferenciaRealCheque > 0) {
+                    estadoCuadratura = 'Saldo por Imputar';
+                } else {
+                    estadoCuadratura = 'Sobre-Imputado';
+                }
+            } else if (g.Banco.toUpperCase() === 'DESCUENTO') {
+                estadoCuadratura = 'Nómina Descuento RRHH';
+            }
+
+            // Actualizar contadores de resumen de documentos
+            resumen.totalDocumentos += 1;
+            if (g.EnTablaCheques) {
+                resumen.documentosEnTablaCheques += 1;
+                resumen.montoChequesRegistrados += g.MontoChequeOriginal;
+                resumen.montoImputadoCheques += g.MontoImputadoGlobal;
+                if (String(g.EstadoCheque).toUpperCase().includes('CERRAD')) {
+                    resumen.documentosCerrados += 1;
+                } else {
+                    resumen.documentosAbiertos += 1;
+                }
+                if (Math.abs(diferenciaRealCheque) <= 5) {
+                    resumen.documentosCuadrados += 1;
+                } else {
+                    resumen.documentosConDiferencia += 1;
+                }
+            } else if (g.Banco.toUpperCase() === 'DESCUENTO') {
+                resumen.documentosNominaDescuento += 1;
+            }
+
+            return {
+                DocKey: g.docKey,
+                Banco: g.Banco,
+                NumeroDocumento: g.NumeroDocumento,
+                EnTablaCheques: g.EnTablaCheques,
+                TipoDocumento: g.TipoDocumento,
+                AreaCheque: g.AreaCheque || Array.from(g.sectoresSet).join(' / '),
+                EstadoCheque: g.EstadoCheque,
+                EstadoCuadratura: estadoCuadratura,
+                FechaCheque: g.FechaCheque,
+                FechaDeposito: g.FechaDepositoMaxMes || g.FechaCheque,
+                FechaDepositoMin: g.FechaDepositoMinMes,
+                FechaDepositoMax: g.FechaDepositoMaxMes,
+                FechaRecepcion: g.FechaRecepcionMaxMes,
+                FechaRecepcionMin: g.FechaRecepcionMinMes,
+                FechaRecepcionMax: g.FechaRecepcionMaxMes,
+                CantMovimientosMes: g.CantMovimientosMes,
+                CantLicencias: g.licenciasSet.size,
+                CantFuncionarios: g.funcionariosSet.size,
+                CantEstablecimientos: g.establecimientosSet.size,
+                TotalDiasPagadosMes: g.TotalDiasPagadosMes,
+                InstitucionesResumen: institucionesResumen || '—',
+                InstitucionesDesglose: institucionesOrdenadas,
+                SectoresResumen: Array.from(g.sectoresSet).join(' / ') || '—',
+                ObservacionesResumen: Array.from(g.observacionesSet).join(' | ') || '—',
+                MontoTotalMes: g.MontoTotalMes,
+                MontoSubsidioMes: g.MontoSubsidioMes,
+                MontoAporteMes: g.MontoAporteMes,
+                MontoDescuentoMes: g.MontoDescuentoMes,
+                MontoDevolucionMes: g.MontoDevolucionMes,
+                MontoChequeOriginal: g.MontoChequeOriginal,
+                SaldoTablaCheque: g.SaldoTablaCheque,
+                MontoImputadoGlobal: g.MontoImputadoGlobal,
+                TotalMovimientosGlobal: g.TotalMovimientosGlobal,
+                DiferenciaRealCheque: diferenciaRealCheque
+            };
+        }).sort((a, b) => {
+            const fa = a.FechaDeposito || a.FechaCheque || '';
+            const fb = b.FechaDeposito || b.FechaCheque || '';
+            if (fa !== fb) return fb.localeCompare(fa);
+            return b.MontoTotalMes - a.MontoTotalMes;
+        });
+
+        resumen.totalLicenciasDistintas = licenciasSetMes.size;
+        resumen.totalFuncionariosDistintos = funcionariosSetMes.size;
+        resumen.diferenciaGlobalCheques = resumen.montoChequesRegistrados - resumen.montoImputadoCheques;
+
+        return res.json({
+            status: 'ok',
+            resumen,
+            documentos,
+            movimientos
+        });
+    } catch (err) {
+        console.error('Error en GET /informes/documentos-pago-mes:', err);
+        res.status(500).json({ error: 'Error consultando documentos de pago recibidos en el mes' });
+    }
+});
+
 module.exports = router;

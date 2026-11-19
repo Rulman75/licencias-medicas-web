@@ -304,6 +304,16 @@ export default function Layout() {
                       Auditar Pagos Masivos
                     </Link>
                     <Link
+                      to="/informes/documentos-pago-mes"
+                      className={`block py-2 px-3 rounded-md transition-colors ${
+                        isActive('/informes/documentos-pago-mes')
+                          ? 'bg-[#39BABD] text-white font-bold'
+                          : 'text-blue-100 hover:bg-white/10'
+                      }`}
+                    >
+                      Documentos de Pago del Mes
+                    </Link>
+                    <Link
                       to="/pagos-masivos/eliminar"
                       className={`block py-2 px-3 rounded-md transition-colors ${
                         isActive('/pagos-masivos/eliminar')
@@ -517,6 +527,16 @@ export default function Layout() {
                           }`}
                         >
                           Anual Pagadas / Impagas
+                        </Link>
+                        <Link
+                          to="/informes/documentos-pago-mes"
+                          className={`block py-2 px-3 rounded-md transition-colors ${
+                            isActive('/informes/documentos-pago-mes')
+                              ? 'bg-[#39BABD] text-white font-bold'
+                              : 'text-blue-100 hover:bg-white/10'
+                          }`}
+                        >
+                          Documentos de Pago del Mes
                         </Link>
                         {MOSTRAR_MODULOS_OCULTOS && (
                           <Link
